@@ -16,6 +16,16 @@ public static class ApiControllersConfiguration
             {
                 // error shaping ที่เดียว — ไม่ใช่ try/catch กระจายใน controller
                 options.Filters.Add<ApiExceptionFilter>();
+
+                // validation ที่เดียว — ไม่ใช่ if (!ModelState.IsValid) ทุก action
+                options.Filters.Add<ValidationFilter>();
+            })
+            .ConfigureApiBehaviorOptions(options =>
+            {
+                // ปิด ProblemDetails อัตโนมัติของ [ApiController]
+                // ไม่งั้น error ของ model binding จะมีหน้าตาคนละแบบกับ
+                // ApiResponse ที่ endpoint อื่นตอบ ทำให้ฝั่ง client ต้องรองรับสองแบบ
+                options.SuppressModelStateInvalidFilter = true;
             })
             .AddJsonOptions(options =>
             {

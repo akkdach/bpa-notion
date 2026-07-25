@@ -1,6 +1,9 @@
+using FluentValidation;
 using ProjectManagementAPI.Data;
 using ProjectManagementAPI.Repositories;
 using ProjectManagementAPI.Repositories.Abstractions;
+using ProjectManagementAPI.Services;
+using ProjectManagementAPI.Services.Abstractions;
 
 namespace ProjectManagementAPI.Configurations;
 
@@ -33,16 +36,25 @@ public static class ApplicationServicesConfiguration
         // ที่เดียวที่แตะ AppDbContext ได้ (บังคับด้วย CI gate)
         services.AddScoped<IHealthRepository, HealthRepository>();
 
-        // Phase 1 — เติมทีละ stage
-        // services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
+
+        // Stage C+
         // services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         // services.AddScoped<IPageRepository, PageRepository>();
 
         // ─── Services ────────────────────────────────────────────────────
-        // services.AddScoped<ITokenService, TokenService>();
-        // services.AddSingleton<IPasswordHasher, PasswordHasher>();
+        services.AddSingleton<IPasswordHasher, PasswordHasher>();
+        services.AddSingleton<ITokenService, TokenService>();
+        services.AddScoped<IAuthService, AuthService>();
+
+        // Stage C+
         // services.AddScoped<IPermissionService, PermissionService>();
         // services.AddScoped<IPageTreeService, PageTreeService>();
+
+        // ─── Validators ──────────────────────────────────────────────────
+        // scan assembly หา AbstractValidator<T> ทั้งหมด — validator ใหม่ไม่ต้อง
+        // มาลงทะเบียนที่นี่ ซึ่งเป็นขั้นที่ลืมได้และลืมแล้วไม่มีอะไรฟ้อง
+        services.AddValidatorsFromAssemblyContaining<Program>(ServiceLifetime.Singleton);
 
         // ─── Property-type strategies (Phase 4a) ─────────────────────────
         // ลงทะเบียนเป็น IEnumerable<IPropertyTypeHandler> แล้วให้

@@ -57,30 +57,33 @@ public class IdentityQueries(AppDbContext db) : IIdentityQueries
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken ct = default)
         => db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  ⚠️ IgnoreQueryFilters ระบุชื่อ filter เสมอ — ปิดแค่ Tenant
+    //     SoftDelete filter ยังทำงานอยู่ workspace ที่ถูกลบจึงไม่โผล่มาเอง
+    //     ไม่ต้องเขียน `w.DeletedAt == null` ซ้ำ
+    //
+    //  ⚠️ OrderBy ต้องอยู่ "ก่อน" projection
+    //     ถ้า project เป็น record ก่อนแล้วค่อย OrderBy(r => r.Name) EF จะแปล
+    //     เป็น SQL ไม่ได้และ throw ตอน runtime — เจอมาแล้วตอน Stage B
+    // ─────────────────────────────────────────────────────────────────────
+    private IQueryable<WorkspaceMembershipRow> MembershipsOf(Guid userId)
+        => from member in db.WorkspaceMembers.IgnoreQueryFilters([AppDbContext.TenantFilter]).AsNoTracking()
+           join workspace in db.Workspaces.IgnoreQueryFilters([AppDbContext.TenantFilter]).AsNoTracking()
+               on member.WorkspaceId equals workspace.Id
+           where member.UserId == userId
+           orderby workspace.Name
+           select new WorkspaceMembershipRow(
+               workspace.Id, workspace.Slug, workspace.Name, workspace.Icon, member.Role);
+
     public Task<List<WorkspaceMembershipRow>> ListMembershipsAsync(
         Guid userId, CancellationToken ct = default)
-        => db.WorkspaceMembers
-             .IgnoreQueryFilters([AppDbContext.TenantFilter])
-             .AsNoTracking()
-             .Where(m => m.UserId == userId)
-             .Join(db.Workspaces.IgnoreQueryFilters([AppDbContext.TenantFilter])
-                     .Where(w => w.DeletedAt == null),
-                   m => m.WorkspaceId,
-                   w => w.Id,
-                   (m, w) => new WorkspaceMembershipRow(w.Id, w.Slug, w.Name, w.Icon, m.Role))
-             .OrderBy(r => r.Name)
-             .ToListAsync(ct);
+        => MembershipsOf(userId).ToListAsync(ct);
 
     public async Task<WorkspaceRole?> ResolveMembershipAsync(
         Guid userId, Guid workspaceId, CancellationToken ct = default)
     {
-        var row = await db.WorkspaceMembers
-            .IgnoreQueryFilters([AppDbContext.TenantFilter])
-            .AsNoTracking()
-            .Where(m => m.UserId == userId && m.WorkspaceId == workspaceId)
-            .Join(db.Workspaces.IgnoreQueryFilters([AppDbContext.TenantFilter])
-                    .Where(w => w.DeletedAt == null),
-                  m => m.WorkspaceId, w => w.Id, (m, _) => new { m.Role })
+        var row = await MembershipsOf(userId)
+            .Where(r => r.WorkspaceId == workspaceId)
             .FirstOrDefaultAsync(ct);
 
         return row?.Role;
@@ -88,14 +91,7 @@ public class IdentityQueries(AppDbContext db) : IIdentityQueries
 
     public Task<WorkspaceMembershipRow?> ResolveMembershipBySlugAsync(
         Guid userId, string slug, CancellationToken ct = default)
-        => db.WorkspaceMembers
-             .IgnoreQueryFilters([AppDbContext.TenantFilter])
-             .AsNoTracking()
-             .Where(m => m.UserId == userId)
-             .Join(db.Workspaces.IgnoreQueryFilters([AppDbContext.TenantFilter])
-                     .Where(w => w.DeletedAt == null && w.Slug == slug),
-                   m => m.WorkspaceId,
-                   w => w.Id,
-                   (m, w) => new WorkspaceMembershipRow(w.Id, w.Slug, w.Name, w.Icon, m.Role))
+        => MembershipsOf(userId)
+             .Where(r => r.Slug == slug)
              .FirstOrDefaultAsync(ct);
 }

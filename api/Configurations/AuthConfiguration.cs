@@ -38,6 +38,17 @@ public static class AuthConfiguration
             })
             .AddJwtBearer(options =>
             {
+                // ─────────────────────────────────────────────────────────
+                //  ปิด inbound claim mapping
+                //
+                //  ค่า default ของ .NET จะ "แปลง" claim สั้น ๆ ของ JWT ให้เป็น
+                //  URI ยาวของ WS-Federation เช่น sub → ClaimTypes.NameIdentifier
+                //  (http://schemas.xmlsoap.org/ws/2005/05/identity/claims/…)
+                //  แล้วโค้ดที่หา User.FindFirst("sub") จะได้ null ทั้งที่ token
+                //  มี sub อยู่ — เป็นความสับสนที่เสียเวลา debug มาก
+                // ─────────────────────────────────────────────────────────
+                options.MapInboundClaims = false;
+
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
