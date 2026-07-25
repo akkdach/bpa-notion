@@ -38,9 +38,8 @@ public static class ApplicationServicesConfiguration
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
-
-        // Stage D+
-        // services.AddScoped<IPageRepository, PageRepository>();
+        services.AddScoped<IPageRepository, PageRepository>();
+        services.AddScoped<IPermissionQueries, PermissionQueries>();
 
         // ─── Services ────────────────────────────────────────────────────
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
@@ -48,9 +47,11 @@ public static class ApplicationServicesConfiguration
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
 
-        // Stage D+
-        // services.AddScoped<IPermissionService, PermissionService>();
-        // services.AddScoped<IPageTreeService, PageTreeService>();
+        // ⚠️ PermissionService ต้องเป็น scoped เท่านั้น — มัน memo คำตอบไว้ใน
+        //    instance ถ้าเป็น singleton จะเอาสิทธิ์ของ user คนหนึ่งไปตอบ
+        //    request ของอีกคน
+        services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IPageTreeService, PageTreeService>();
 
         // ─── Validators ──────────────────────────────────────────────────
         // scan assembly หา AbstractValidator<T> ทั้งหมด — validator ใหม่ไม่ต้อง

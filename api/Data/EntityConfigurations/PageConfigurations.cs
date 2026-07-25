@@ -27,7 +27,27 @@ public class PageConfiguration : IEntityTypeConfiguration<Page>
                .HasDefaultValueSql("'{}'::uuid[]");
 
         builder.Property(p => p.Depth).IsRequired().HasDefaultValue(0);
-        builder.Property(p => p.Rank).IsRequired().HasMaxLength(200);
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ⚠️ rank ต้องเป็น COLLATE "C" — byte order ล้วน ๆ
+        //
+        //  fractional index ใช้ base62 (0-9 A-Z a-z) และอัลกอริทึมทั้งหมด
+        //  ตั้งอยู่บนสมมติฐานว่าการเทียบสตริงเป็น "ordinal"
+        //
+        //  แต่ฐานนี้ตั้ง ICU th-TH เป็น collation หลัก ซึ่งเรียงแบบ
+        //      a0  A0  b0  B0  z0  Z0
+        //  ขณะที่ byte order เรียงแบบ
+        //      A0  B0  Z0  a0  b0  z0
+        //
+        //  ถ้าไม่บังคับ collation ตรงนี้ ORDER BY rank จะให้ลำดับที่ไม่ตรงกับ
+        //  ที่ generateKeyBetween คำนวณไว้ → หน้าเรียงสลับกันเอง และการแทรก
+        //  ครั้งถัดไปจะคำนวณจากคู่ที่ผิด อาการจะโผล่ก็ต่อเมื่อมี rank ที่ปนตัว
+        //  พิมพ์ใหญ่พิมพ์เล็ก ซึ่งเกิดหลังแทรก/ลบไปสักพัก — คือหลัง deploy
+        // ─────────────────────────────────────────────────────────────────
+        builder.Property(p => p.Rank)
+               .IsRequired()
+               .HasMaxLength(200)
+               .UseCollation("C");
 
         builder.Property(p => p.Kind)
                .HasConversion(RoleConverters.PageKind)

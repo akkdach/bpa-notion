@@ -404,6 +404,194 @@ async function main() {
     afterLeave.status === 404, `ได้ ${afterLeave.status}`)
 
   // ═══════════════════════════════════════════════════════════════════════
+  section('page tree — สร้างและซ้อนชั้น')
+  // ═══════════════════════════════════════════════════════════════════════
+  const mk = async (parentId, title, opts = {}) => {
+    const r = await call('POST', '/pages', {
+      ...asOwner, body: { parentId, title, ...opts },
+    })
+    return r.body?.data
+  }
+
+  const root = await mk(null, 'คู่มือพนักงาน')
+  check('สร้างหน้าระดับบนสุดได้', root?.id !== undefined, JSON.stringify(root))
+  check('depth = 0', root?.depth === 0)
+  check('ancestorIds ว่าง', Array.isArray(root?.ancestorIds) && root.ancestorIds.length === 0)
+  check('เป็น access root ของตัวเอง', root?.accessRootId === root?.id)
+  check('rank เริ่มที่ a0', root?.rank === 'a0', root?.rank)
+  check('ชื่อไทยกลับมาครบ', root?.title === 'คู่มือพนักงาน')
+
+  const child = await mk(root.id, 'ระเบียบการลา')
+  check('depth = 1', child?.depth === 1)
+  check('ancestorIds = [root]',
+    child?.ancestorIds?.length === 1 && child.ancestorIds[0] === root.id)
+  check('สืบทอด access root จากหน้าแม่', child?.accessRootId === root.id)
+
+  const grand = await mk(child.id, 'ลาพักร้อน')
+  check('depth = 2', grand?.depth === 2)
+  check('ancestorIds เรียงจาก root ลงมา',
+    grand?.ancestorIds?.length === 2 &&
+    grand.ancestorIds[0] === root.id && grand.ancestorIds[1] === child.id,
+    JSON.stringify(grand?.ancestorIds))
+  check('หลานยังสืบทอด access root เดิม', grand?.accessRootId === root.id)
+
+  // ─── ลำดับพี่น้อง ───────────────────────────────────────────────────────
+  const s1 = await mk(root.id, 'พี่น้อง ๑')
+  const s2 = await mk(root.id, 'พี่น้อง ๒')
+  const middle = await call('POST', '/pages', {
+    ...asOwner, body: { parentId: root.id, title: 'แทรกกลาง', afterPageId: child.id },
+  })
+  check('แทรกระหว่างพี่น้องได้', middle.status === 201, `ได้ ${middle.status}`)
+
+  const treeAfterInsert = (await call('GET', '/pages', asOwner)).body?.data ?? []
+  const childrenOfRoot = treeAfterInsert
+    .filter((n) => n.parentId === root.id)
+    .map((n) => n.title)
+  check('ลำดับพี่น้องถูกต้องหลังแทรกกลาง',
+    JSON.stringify(childrenOfRoot) ===
+      JSON.stringify(['ระเบียบการลา', 'แทรกกลาง', 'พี่น้อง ๑', 'พี่น้อง ๒']),
+    JSON.stringify(childrenOfRoot))
+
+  check('rank ของตัวที่แทรกอยู่ระหว่างเพื่อนบ้านจริง',
+    middle.body.data.rank > child.rank && middle.body.data.rank < s1.rank,
+    `${child.rank} < ${middle.body.data.rank} < ${s1.rank}`)
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('page tree — กันวงกลม')
+  // ═══════════════════════════════════════════════════════════════════════
+  const selfMove = await call('POST', `/pages/${root.id}/move`, {
+    ...asOwner, body: { parentId: root.id },
+  })
+  check('ย้ายหน้าไปใต้ตัวเอง → 400', selfMove.status === 400, `ได้ ${selfMove.status}`)
+
+  const cycleMove = await call('POST', `/pages/${root.id}/move`, {
+    ...asOwner, body: { parentId: grand.id },
+  })
+  check('ย้ายหน้าไปใต้ลูกหลานของตัวเอง → 400', cycleMove.status === 400, `ได้ ${cycleMove.status}`)
+  check('code = cycle', cycleMove.body?.code === 'cycle', JSON.stringify(cycleMove.body))
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('page tree — ย้าย subtree ใหญ่')
+  // ═══════════════════════════════════════════════════════════════════════
+  const bigRoot = await mk(null, 'ต้นไม้ใหญ่')
+  const branch = await mk(bigRoot.id, 'กิ่ง')
+
+  // สร้างลูกหลาน 500 หน้าใต้ branch (สลับชั้นเพื่อให้ depth ต่างกันจริง)
+  const created = []
+  let currentParent = branch.id
+  for (let i = 0; i < 500; i++) {
+    const p = await mk(currentParent, `ใบที่ ${i + 1}`)
+    created.push(p)
+    // ทุก 50 ใบเลื่อนลงชั้นถัดไป — ได้ tree ลึก 10 ชั้น ไม่ใช่แบนราบ
+    if ((i + 1) % 50 === 0) currentParent = p.id
+  }
+  check('สร้างลูกหลาน 500 หน้าได้', created.length === 500 && created.every((p) => p?.id))
+  check('ลึกสุดมากกว่า 10 ชั้น', Math.max(...created.map((p) => p.depth)) >= 10,
+    `ลึกสุด ${Math.max(...created.map((p) => p.depth))}`)
+
+  const moveStart = Date.now()
+  const moved = await call('POST', `/pages/${branch.id}/move`, {
+    ...asOwner, body: { parentId: root.id },
+  })
+  const moveMs = Date.now() - moveStart
+
+  check('ย้าย branch ที่มีลูกหลาน 500 หน้าสำเร็จ', moved.status === 200,
+    `ได้ ${moved.status} ${JSON.stringify(moved.body).slice(0, 200)}`)
+  check(`อัปเดตลูกหลานครบ 500 แถว (ใช้ ${moveMs}ms)`,
+    moved.body?.data?.affectedDescendants === 500,
+    `ได้ ${moved.body?.data?.affectedDescendants}`)
+  check('เร็วพอที่จะเชื่อว่าเป็น UPDATE เดียว ไม่ใช่ loop (<1500ms)', moveMs < 1500,
+    `ใช้ ${moveMs}ms — ถ้าเป็น loop 500 รอบจะช้ากว่านี้มาก`)
+  check('depth ของหน้าที่ย้ายเปลี่ยนถูกต้อง', moved.body?.data?.page?.depth === 1,
+    `ได้ ${moved.body?.data?.page?.depth}`)
+
+  // ลูกหลานต้องอัปเดต ancestorIds ตามไปด้วย
+  const leaf = await call('GET', `/pages/${created[0].id}`, asOwner)
+  check('ลูกหลานมี root ใหม่อยู่ใน ancestorIds',
+    leaf.body?.data?.ancestorIds?.[0] === root.id,
+    JSON.stringify(leaf.body?.data?.ancestorIds))
+  check('ลูกหลานเปลี่ยน access root ตามไปด้วย',
+    leaf.body?.data?.accessRootId === root.id,
+    leaf.body?.data?.accessRootId)
+
+  const deepLeaf = await call('GET', `/pages/${created[499].id}`, asOwner)
+  check('ใบที่ลึกที่สุดก็ ancestorIds ถูก',
+    deepLeaf.body?.data?.ancestorIds?.[0] === root.id &&
+    deepLeaf.body?.data?.depth === deepLeaf.body?.data?.ancestorIds?.length,
+    `depth=${deepLeaf.body?.data?.depth} ancestors=${deepLeaf.body?.data?.ancestorIds?.length}`)
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('page tree — ตรวจความสอดคล้อง')
+  // ═══════════════════════════════════════════════════════════════════════
+  const consistency = await call('GET', '/pages/maintenance/consistency', asOwner)
+  check('ตรวจความสอดคล้องได้', consistency.status === 200, `ได้ ${consistency.status}`)
+  check('ancestor_ids ไม่มีแถวเพี้ยน', consistency.body?.data?.badAncestors === 0,
+    `เพี้ยน ${consistency.body?.data?.badAncestors} แถว`)
+  check('access_root_id ไม่มีแถวเพี้ยน', consistency.body?.data?.badAccessRoots === 0,
+    `เพี้ยน ${consistency.body?.data?.badAccessRoots} แถว`)
+  check('ไม่มีหน้ากำพร้า', consistency.body?.data?.orphans === 0)
+
+  const repair = await call('POST', '/pages/maintenance/repair', asOwner)
+  check('ซ่อมแล้วไม่มีอะไรต้องแก้ (แปลว่าข้อมูลถูกอยู่แล้ว)',
+    repair.body?.data?.fixedAncestors === 0 && repair.body?.data?.fixedAccessRoots === 0,
+    JSON.stringify(repair.body?.data))
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('page tree — ถังขยะ')
+  // ═══════════════════════════════════════════════════════════════════════
+  const deleted = await call('DELETE', `/pages/${child.id}`, asOwner)
+  check('ลบหน้าพร้อมลูกหลาน', deleted.status === 200, `ได้ ${deleted.status}`)
+  check('ลบไป 2 หน้า (ตัวเอง + ลูก)', deleted.body?.data === 2, `ได้ ${deleted.body?.data}`)
+
+  const afterDelete = (await call('GET', '/pages', asOwner)).body?.data ?? []
+  check('หน้าที่ลบหายจาก tree', !afterDelete.some((n) => n.id === child.id))
+  check('ลูกของมันก็หายด้วย', !afterDelete.some((n) => n.id === grand.id))
+
+  const trash = await call('GET', '/pages/trash', asOwner)
+  check('เห็นหน้าที่ลบในถังขยะ',
+    trash.body?.data?.some((n) => n.id === child.id), `${trash.body?.data?.length} รายการ`)
+
+  const restoreChildFirst = await call('POST', `/pages/${grand.id}/restore`, asOwner)
+  check('กู้คืนลูกก่อนแม่ไม่ได้ → 409', restoreChildFirst.status === 409,
+    `ได้ ${restoreChildFirst.status}`)
+  check('code = parent_still_deleted', restoreChildFirst.body?.code === 'parent_still_deleted')
+
+  const restored = await call('POST', `/pages/${child.id}/restore`, asOwner)
+  check('กู้คืนจากบนลงล่างได้', restored.status === 200, `ได้ ${restored.status}`)
+
+  const afterRestore = (await call('GET', '/pages', asOwner)).body?.data ?? []
+  check('หน้ากลับมาใน tree', afterRestore.some((n) => n.id === child.id))
+  check('ลูกกลับมาด้วย', afterRestore.some((n) => n.id === grand.id))
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('⚠️ page tree — tenant isolation')
+  // ═══════════════════════════════════════════════════════════════════════
+  const outsiderWs = (await call('POST', '/workspaces', {
+    token: intruderToken, body: { name: 'ที่ทำงานคนนอก' },
+  })).body?.data
+
+  const asOutsider = { token: intruderToken, workspaceId: outsiderWs.id }
+
+  const readOthersPage = await call('GET', `/pages/${root.id}`, asOutsider)
+  check('อ่านหน้าของ workspace อื่นไม่ได้ → 404', readOthersPage.status === 404,
+    `ได้ ${readOthersPage.status}`)
+
+  const moveOthersPage = await call('POST', `/pages/${root.id}/move`, {
+    ...asOutsider, body: { parentId: null },
+  })
+  check('ย้ายหน้าของ workspace อื่นไม่ได้ → 404', moveOthersPage.status === 404,
+    `ได้ ${moveOthersPage.status}`)
+
+  const deleteOthersPage = await call('DELETE', `/pages/${root.id}`, asOutsider)
+  check('ลบหน้าของ workspace อื่นไม่ได้ → 404', deleteOthersPage.status === 404,
+    `ได้ ${deleteOthersPage.status}`)
+
+  const outsiderTree = (await call('GET', '/pages', asOutsider)).body?.data ?? []
+  check('tree ของคนนอกไม่มีหน้าของเราเลย',
+    !outsiderTree.some((n) => n.id === root.id || n.id === bigRoot.id),
+    `${outsiderTree.length} หน้า`)
+
+  // ═══════════════════════════════════════════════════════════════════════
   // สรุป
   // ═══════════════════════════════════════════════════════════════════════
   process.stdout.write(`\n${C.bold}สรุป${C.off} ${C.green}ผ่าน ${passed}${C.off} / ${failed > 0 ? C.red : C.dim}ไม่ผ่าน ${failed}${C.off}\n`)
