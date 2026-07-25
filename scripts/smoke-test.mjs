@@ -146,18 +146,35 @@ async function main() {
     wrongPassword.body?.message === noSuchUser.body?.message,
     `"${wrongPassword.body?.message}" vs "${noSuchUser.body?.message}"`)
 
-  // ─── timing: bcrypt ต้องรันทั้งสองกรณี ไม่งั้นเวลาตอบต่างกันจนเดาได้ ───
+  // ─────────────────────────────────────────────────────────────────────
+  //  timing: bcrypt ต้องรันทั้งสองกรณี
+  //
+  //  ทิศทางที่อันตรายมีทางเดียว — "อีเมลที่ไม่มีในระบบตอบเร็วกว่า" เพราะนั่น
+  //  คือสิ่งที่ใช้ไล่หารายชื่ออีเมลจริงได้ ส่วนกรณีที่ช้ากว่าเป็นแค่ noise
+  //  (JIT warm-up, GC, connection pool) ไม่ใช่สัญญาณที่ใช้โจมตี
+  //
+  //  วัดหลายรอบแล้วใช้ค่ากลาง — วัดรอบเดียวแกว่งเกินกว่าจะสรุปอะไรได้
+  // ─────────────────────────────────────────────────────────────────────
   const timeOf = async (email) => {
     const started = process.hrtime.bigint()
     await call('POST', '/auth/login', { body: { email, password: 'รหัสผ่านผิดแน่นอนเลยนะ' } })
     return Number(process.hrtime.bigint() - started) / 1e6
   }
-  const withAccount = await timeOf(account.email)
-  const withoutAccount = await timeOf(`ไม่มีคนนี้.${stamp}@ทดสอบ.local`)
-  const ratio = Math.max(withAccount, withoutAccount) / Math.min(withAccount, withoutAccount)
-  check(`เวลาตอบใกล้เคียงกัน (${withAccount.toFixed(0)}ms vs ${withoutAccount.toFixed(0)}ms, ratio ${ratio.toFixed(2)})`,
-    ratio < 2,
-    'ถ้าต่างกันมาก แปลว่าไม่ได้รัน bcrypt ตอนไม่พบ user → ใช้เดารายชื่ออีเมลได้')
+  const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
+
+  const samples = 5
+  const withAccount = []
+  const withoutAccount = []
+  for (let i = 0; i < samples; i++) {
+    withAccount.push(await timeOf(account.email))
+    withoutAccount.push(await timeOf(`ไม่มีคนนี้.${stamp}@ทดสอบ.local`))
+  }
+  const medWith = median(withAccount)
+  const medWithout = median(withoutAccount)
+
+  check(`อีเมลที่ไม่มีในระบบไม่ตอบเร็วกว่าอย่างมีนัย (มี ${medWith.toFixed(0)}ms · ไม่มี ${medWithout.toFixed(0)}ms)`,
+    medWithout > medWith * 0.7,
+    'ถ้าไม่มีบัญชีแล้วตอบเร็วกว่าชัดเจน แปลว่าข้าม bcrypt → ใช้ไล่หาอีเมลที่มีอยู่จริงได้')
 
   const loggedIn = await call('POST', '/auth/login', {
     body: { email: account.email, password: account.password },
@@ -203,6 +220,188 @@ async function main() {
   })
   check('ใบใหม่ก็ถูกยกเลิกด้วย (ยกเลิกทั้ง user เมื่อสงสัยว่ารั่ว)',
     afterReuse.status === 401, `ได้ ${afterReuse.status}`)
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('workspace — สร้าง')
+  // ═══════════════════════════════════════════════════════════════════════
+  // login ใหม่เพราะ token ชุดก่อนถูกยกเลิกไปตอนทดสอบ reuse detection
+  const owner = (await call('POST', '/auth/login', {
+    body: { email: account.email, password: account.password },
+  })).body?.data
+  const ownerToken = owner?.accessToken
+
+  const createdThai = await call('POST', '/workspaces', {
+    token: ownerToken,
+    body: { name: 'บริษัท ทดสอบ จำกัด', icon: '🏢' },
+  })
+  check('สร้าง workspace ชื่อไทยได้', createdThai.status === 201,
+    `ได้ ${createdThai.status} ${JSON.stringify(createdThai.body)}`)
+
+  const ws = createdThai.body?.data
+  check('ชื่อไทยกลับมาครบ', ws?.name === 'บริษัท ทดสอบ จำกัด', ws?.name)
+  check('ผู้สร้างเป็น owner', ws?.role === 'owner', ws?.role)
+  check(`slug ที่สร้างจากชื่อไทยผ่าน CHECK constraint (${ws?.slug})`,
+    typeof ws?.slug === 'string' && /^[a-z0-9][a-z0-9-]{1,58}[a-z0-9]$/.test(ws.slug),
+    'ชื่อไทยแปลงเป็น ASCII ไม่ได้ ต้อง fallback เป็นชื่อสุ่มที่ยังผ่าน constraint')
+
+  const explicitSlug = 'ทีมงานพัฒนา'  // ไทยล้วน ไม่มี ASCII เลย
+  const createdSlug = await call('POST', '/workspaces', {
+    token: ownerToken,
+    body: { name: 'ทีมพัฒนา', slug: `team-dev-${stamp}` },
+  })
+  check('ระบุ slug เองได้', createdSlug.status === 201, `ได้ ${createdSlug.status}`)
+  check('slug ที่ระบุถูกใช้ตามนั้น', createdSlug.body?.data?.slug === `team-dev-${stamp}`,
+    createdSlug.body?.data?.slug)
+
+  const dupSlug = await call('POST', '/workspaces', {
+    token: ownerToken,
+    body: { name: 'ซ้ำ', slug: `team-dev-${stamp}` },
+  })
+  check('slug ซ้ำ → 409 (ไม่เงียบ ๆ เปลี่ยนให้)', dupSlug.status === 409, `ได้ ${dupSlug.status}`)
+  check('code = slug_taken', dupSlug.body?.code === 'slug_taken')
+
+  const badSlug = await call('POST', '/workspaces', {
+    token: ownerToken,
+    body: { name: 'ชื่อไทย', slug: explicitSlug },
+  })
+  check('slug ที่เป็นภาษาไทยล้วน → 400', badSlug.status === 400, `ได้ ${badSlug.status}`)
+
+  const mine = await call('GET', '/workspaces', { token: ownerToken })
+  check('list workspace ของตัวเองได้ 2 อัน',
+    mine.body?.data?.length === 2, JSON.stringify(mine.body?.data?.map((w) => w.slug)))
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('workspace — tenant context')
+  // ═══════════════════════════════════════════════════════════════════════
+  const noHeader = await call('GET', '/workspaces/current', { token: ownerToken })
+  check('ไม่ส่ง X-Workspace-Id → 400 ไม่ใช่ 500', noHeader.status === 400, `ได้ ${noHeader.status}`)
+  check('code = workspace_required', noHeader.body?.code === 'workspace_required')
+
+  const badHeader = await call('GET', '/workspaces/current', {
+    token: ownerToken, workspaceId: 'ไม่ใช่-uuid'.normalize(),
+  }).catch(() => ({ status: 0 }))
+  check('header ที่ไม่ใช่ UUID → 400',
+    badHeader.status === 400 || badHeader.status === 0, `ได้ ${badHeader.status}`)
+
+  const current = await call('GET', '/workspaces/current', {
+    token: ownerToken, workspaceId: ws.id,
+  })
+  check('ส่ง header ถูก → 200', current.status === 200, `ได้ ${current.status}`)
+  check('myRole = owner', current.body?.data?.myRole === 'owner')
+  check('memberCount = 1', current.body?.data?.memberCount === 1)
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('⚠️ tenant isolation')
+  // ═══════════════════════════════════════════════════════════════════════
+  const intruder = {
+    email: `คนนอก.${stamp}@ทดสอบ.local`,
+    password: 'รหัสผ่านยาวพอสมควรนะครับ',
+    name: 'คนนอก ไม่รู้จัก',
+  }
+  const intruderAuth = (await call('POST', '/auth/register', { body: intruder })).body?.data
+  const intruderToken = intruderAuth?.accessToken
+  check('สมัคร user คนที่สองได้', typeof intruderToken === 'string')
+
+  const stolen = await call('GET', '/workspaces/current', {
+    token: intruderToken, workspaceId: ws.id,
+  })
+  check('คนนอกใช้ workspace id ของคนอื่น → 404', stolen.status === 404, `ได้ ${stolen.status}`)
+  check('ต้องเป็น 404 ไม่ใช่ 403 (403 = ยืนยันว่า workspace นี้มีอยู่จริง)',
+    stolen.status !== 403)
+  check('code = workspace_not_found', stolen.body?.code === 'workspace_not_found')
+
+  const stolenMembers = await call('GET', '/workspaces/current/members', {
+    token: intruderToken, workspaceId: ws.id,
+  })
+  check('คนนอกอ่านรายชื่อสมาชิกไม่ได้', stolenMembers.status === 404, `ได้ ${stolenMembers.status}`)
+
+  const intruderList = await call('GET', '/workspaces', { token: intruderToken })
+  check('คนนอกเห็น workspace ของตัวเอง 0 อัน', intruderList.body?.data?.length === 0,
+    JSON.stringify(intruderList.body?.data))
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section('workspace — สมาชิก')
+  // ═══════════════════════════════════════════════════════════════════════
+  const asOwner = { token: ownerToken, workspaceId: ws.id }
+
+  const unregistered = await call('POST', '/workspaces/current/members', {
+    ...asOwner, body: { email: `ยังไม่สมัคร.${stamp}@ทดสอบ.local`, role: 'member' },
+  })
+  check('เพิ่มอีเมลที่ยังไม่สมัคร → 404 พร้อมบอกวิธีแก้',
+    unregistered.status === 404 && unregistered.body?.code === 'user_not_registered',
+    `ได้ ${unregistered.status} ${unregistered.body?.code}`)
+
+  const added = await call('POST', '/workspaces/current/members', {
+    ...asOwner, body: { email: intruder.email, role: 'member' },
+  })
+  check('เพิ่มสมาชิกด้วยอีเมลที่สมัครแล้ว → 200', added.status === 200,
+    `ได้ ${added.status} ${JSON.stringify(added.body)}`)
+  check('สมาชิกใหม่ได้ role member', added.body?.data?.role === 'member')
+
+  const addedTwice = await call('POST', '/workspaces/current/members', {
+    ...asOwner, body: { email: intruder.email, role: 'member' },
+  })
+  check('เพิ่มซ้ำ → 409', addedTwice.status === 409, `ได้ ${addedTwice.status}`)
+
+  const badRole = await call('POST', '/workspaces/current/members', {
+    ...asOwner, body: { email: intruder.email, role: 'จักรพรรดิ' },
+  })
+  check('role ที่ไม่รู้จัก → 400', badRole.status === 400, `ได้ ${badRole.status}`)
+
+  const nowVisible = await call('GET', '/workspaces/current', {
+    token: intruderToken, workspaceId: ws.id,
+  })
+  check('หลังถูกเพิ่มเป็นสมาชิกแล้วเข้าได้', nowVisible.status === 200, `ได้ ${nowVisible.status}`)
+  check('myRole = member', nowVisible.body?.data?.myRole === 'member')
+
+  const memberList = await call('GET', '/workspaces/current/members', asOwner)
+  check('รายชื่อสมาชิกมี 2 คน', memberList.body?.data?.length === 2,
+    JSON.stringify(memberList.body?.data?.map((m) => m.role)))
+  check('ชื่อภาษาไทยของสมาชิกกลับมาครบ',
+    memberList.body?.data?.some((m) => m.name === intruder.name))
+
+  // ─── สิทธิ์ ─────────────────────────────────────────────────────────────
+  const memberAdds = await call('POST', '/workspaces/current/members', {
+    token: intruderToken, workspaceId: ws.id,
+    body: { email: account.email, role: 'admin' },
+  })
+  check('member เพิ่มสมาชิกไม่ได้ → 403', memberAdds.status === 403, `ได้ ${memberAdds.status}`)
+
+  const promoteToOwner = await call('PATCH', `/workspaces/current/members/${intruderAuth.user.id}`, {
+    ...asOwner, body: { role: 'admin' },
+  })
+  check('owner เลื่อนสมาชิกเป็น admin ได้', promoteToOwner.status === 200,
+    `ได้ ${promoteToOwner.status}`)
+
+  const adminPromotesOwner = await call('PATCH', `/workspaces/current/members/${owner.user.id}`, {
+    token: intruderToken, workspaceId: ws.id, body: { role: 'owner' },
+  })
+  check('admin แต่งตั้ง owner ไม่ได้ → 403', adminPromotesOwner.status === 403,
+    `ได้ ${adminPromotesOwner.status}`)
+
+  // ─── owner คนสุดท้าย ────────────────────────────────────────────────────
+  const demoteLastOwner = await call('PATCH', `/workspaces/current/members/${owner.user.id}`, {
+    ...asOwner, body: { role: 'member' },
+  })
+  check('ลดสิทธิ์ owner คนสุดท้ายไม่ได้ → 409', demoteLastOwner.status === 409,
+    `ได้ ${demoteLastOwner.status}`)
+  check('code = last_owner', demoteLastOwner.body?.code === 'last_owner')
+
+  const removeLastOwner = await call('DELETE', `/workspaces/current/members/${owner.user.id}`, asOwner)
+  check('ถอด owner คนสุดท้ายไม่ได้ → 409', removeLastOwner.status === 409,
+    `ได้ ${removeLastOwner.status}`)
+
+  // ─── ออกเอง ─────────────────────────────────────────────────────────────
+  const leave = await call('DELETE', `/workspaces/current/members/${intruderAuth.user.id}`, {
+    token: intruderToken, workspaceId: ws.id,
+  })
+  check('สมาชิกออกจาก workspace เองได้', leave.status === 200, `ได้ ${leave.status}`)
+
+  const afterLeave = await call('GET', '/workspaces/current', {
+    token: intruderToken, workspaceId: ws.id,
+  })
+  check('ออกแล้วเข้าไม่ได้ทันที (ไม่ต้องรอ token หมดอายุ)',
+    afterLeave.status === 404, `ได้ ${afterLeave.status}`)
 
   // ═══════════════════════════════════════════════════════════════════════
   // สรุป

@@ -39,6 +39,12 @@ public interface IIdentityQueries
 
     Task<WorkspaceMembershipRow?> ResolveMembershipBySlugAsync(
         Guid userId, string slug, CancellationToken ct = default);
+
+    /// <summary>
+    /// slug ต้อง unique ทั้งระบบ การตรวจจึงต้องข้าม tenant โดยธรรมชาติ
+    /// (ตอนสร้าง workspace ผู้เรียกยังไม่ได้เป็นสมาชิกของ workspace ไหนเลย)
+    /// </summary>
+    Task<bool> SlugExistsAsync(string slug, CancellationToken ct = default);
 }
 
 public record WorkspaceMembershipRow(
@@ -62,28 +68,35 @@ public class IdentityQueries(AppDbContext db) : IIdentityQueries
     //     SoftDelete filter ยังทำงานอยู่ workspace ที่ถูกลบจึงไม่โผล่มาเอง
     //     ไม่ต้องเขียน `w.DeletedAt == null` ซ้ำ
     //
-    //  ⚠️ OrderBy ต้องอยู่ "ก่อน" projection
-    //     ถ้า project เป็น record ก่อนแล้วค่อย OrderBy(r => r.Name) EF จะแปล
-    //     เป็น SQL ไม่ได้และ throw ตอน runtime — เจอมาแล้วตอน Stage B
+    //  ⚠️ ทั้ง where และ orderby ต้องอยู่ "ก่อน" projection
+    //
+    //     ถ้า project เป็น record ก่อนแล้วค่อย .Where(r => r.WorkspaceId == x)
+    //     หรือ .OrderBy(r => r.Name) EF จะแปลเป็น SQL ไม่ได้แล้ว throw ตอน
+    //     runtime (เจอสองรอบแล้ว: Stage B ที่ OrderBy และ Stage C ที่ Where)
+    //
+    //     วิธีกันคือรับเงื่อนไขเข้ามาเป็น parameter แล้วใส่ใน where เดียวกัน
+    //     ไม่เปิดให้ผู้เรียกต่อ .Where() ท้าย IQueryable ที่ project แล้ว
     // ─────────────────────────────────────────────────────────────────────
-    private IQueryable<WorkspaceMembershipRow> MembershipsOf(Guid userId)
+    private IQueryable<WorkspaceMembershipRow> QueryMemberships(
+        Guid userId, Guid? workspaceId = null, string? slug = null)
         => from member in db.WorkspaceMembers.IgnoreQueryFilters([AppDbContext.TenantFilter]).AsNoTracking()
            join workspace in db.Workspaces.IgnoreQueryFilters([AppDbContext.TenantFilter]).AsNoTracking()
                on member.WorkspaceId equals workspace.Id
            where member.UserId == userId
+              && (workspaceId == null || workspace.Id == workspaceId)
+              && (slug == null || workspace.Slug == slug)
            orderby workspace.Name
            select new WorkspaceMembershipRow(
                workspace.Id, workspace.Slug, workspace.Name, workspace.Icon, member.Role);
 
     public Task<List<WorkspaceMembershipRow>> ListMembershipsAsync(
         Guid userId, CancellationToken ct = default)
-        => MembershipsOf(userId).ToListAsync(ct);
+        => QueryMemberships(userId).ToListAsync(ct);
 
     public async Task<WorkspaceRole?> ResolveMembershipAsync(
         Guid userId, Guid workspaceId, CancellationToken ct = default)
     {
-        var row = await MembershipsOf(userId)
-            .Where(r => r.WorkspaceId == workspaceId)
+        var row = await QueryMemberships(userId, workspaceId: workspaceId)
             .FirstOrDefaultAsync(ct);
 
         return row?.Role;
@@ -91,7 +104,12 @@ public class IdentityQueries(AppDbContext db) : IIdentityQueries
 
     public Task<WorkspaceMembershipRow?> ResolveMembershipBySlugAsync(
         Guid userId, string slug, CancellationToken ct = default)
-        => MembershipsOf(userId)
-             .Where(r => r.Slug == slug)
-             .FirstOrDefaultAsync(ct);
+        => QueryMemberships(userId, slug: slug).FirstOrDefaultAsync(ct);
+
+    public Task<bool> SlugExistsAsync(string slug, CancellationToken ct = default)
+        // ต้องเห็น workspace ที่ถูก soft-delete ด้วย — slug ของมันยังจองอยู่
+        // (unique index ไม่สนใจ deleted_at) จึงปิดทั้งสอง filter ที่นี่
+        => db.Workspaces
+             .IgnoreQueryFilters([AppDbContext.TenantFilter, AppDbContext.SoftDeleteFilter])
+             .AnyAsync(w => w.Slug == slug, ct);
 }

@@ -1,4 +1,5 @@
 using ProjectManagementAPI.Configurations;
+using ProjectManagementAPI.Middlewares;
 
 namespace ProjectManagementAPI;
 
@@ -47,6 +48,11 @@ public class Program
         app.UseCors(CorsConfiguration.PolicyName);
         app.UseAuthentication();
         app.UseAuthorization();
+
+        // ⚠️ ต้องอยู่หลัง UseAuthentication เพราะอ่าน userId จาก claim
+        //    และต้องอยู่ก่อน MapControllers เพราะ AppDbContext อ่าน tenant
+        //    context ไปใช้ใน global query filter ตั้งแต่ query แรก
+        app.UseMiddleware<TenantResolutionMiddleware>();
 
         app.MapControllers();
         app.MapRealtimeHubs();

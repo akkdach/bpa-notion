@@ -37,17 +37,18 @@ public static class ApplicationServicesConfiguration
         services.AddScoped<IHealthRepository, HealthRepository>();
 
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
 
-        // Stage C+
-        // services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
+        // Stage D+
         // services.AddScoped<IPageRepository, PageRepository>();
 
         // ─── Services ────────────────────────────────────────────────────
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<ITokenService, TokenService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IWorkspaceService, WorkspaceService>();
 
-        // Stage C+
+        // Stage D+
         // services.AddScoped<IPermissionService, PermissionService>();
         // services.AddScoped<IPageTreeService, PageTreeService>();
 
