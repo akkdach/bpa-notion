@@ -52,3 +52,12 @@ public record MoveResultDto(PageDto Page, int AffectedDescendants);
 public record RepairResultDto(int FixedAncestors, int FixedAccessRoots);
 
 public record BreadcrumbDto(Guid Id, string Title, string? Icon);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  projection ที่ client แกะจาก Y.Doc ส่งกลับมา
+//
+//  เซิร์ฟเวอร์อ่าน Yjs ไม่ได้ (เก็บเป็น bytea ทึบ ๆ) จึงต้องให้ client เป็นคน
+//  แปลงเป็น plain text ให้ ข้อมูลนี้ derived ทั้งหมด — ถ้าล้าสมัยผลค้นหา
+//  ล้าสมัย แต่ไม่มีอะไรเสียหายและสร้างใหม่ได้เสมอ
+// ═══════════════════════════════════════════════════════════════════════════
+public record ProjectionRequest(string? Title, string? PlainText);

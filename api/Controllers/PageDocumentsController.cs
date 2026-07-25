@@ -1,0 +1,136 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using ProjectManagementAPI.DTOs;
+using ProjectManagementAPI.Filters;
+using ProjectManagementAPI.Helpers;
+using ProjectManagementAPI.Services.Abstractions;
+
+namespace ProjectManagementAPI.Controllers;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  เนื้อหาของหน้า (Yjs)
+//
+//  ⚠️ bootstrap อยู่บน REST ไม่ใช่ SignalR โดยเจตนา
+//     SignalR จำกัดข้อความไว้ 32KB โดย default และ full state ของเอกสารที่ใช้
+//     งานจริงใหญ่กว่านั้นได้ง่าย ๆ การใช้ REST ทำให้ไม่ต้องไปสู้กับลิมิตนั้น
+//     และได้ HTTP caching/compression มาฟรี ๆ
+// ═══════════════════════════════════════════════════════════════════════════
+[ApiController]
+[Route("api/v1/pages/{pageId:guid}")]
+[Authorize]
+[RequireWorkspace]
+public class PageDocumentsController(IDocumentService documents) : ControllerBase
+{
+    /// <summary>ขนาดสูงสุดของ body ที่รับ — ตรงกับ MaximumReceiveMessageSize ของ SignalR</summary>
+    private const int MaxBodyBytes = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// ทุกอย่างที่ต้องใช้ประกอบเอกสาร: snapshot + update ที่เกิดหลังจากนั้น
+    ///
+    /// ตอบเป็น application/octet-stream รูปแบบ [u32 count][u32 len][bytes]…
+    /// frame 0 คือ snapshot (ยาว 0 ถ้ายังไม่เคย compact)
+    ///
+    /// metadata ไปกับ response header เพื่อให้ body เป็นไบนารีล้วน
+    /// </summary>
+    // ⚠️ ห้ามใส่ [Produces("application/octet-stream")]
+    //
+    //    มันบังคับ content negotiation ทั้ง action ทำให้ตอนตอบ error เป็น JSON
+    //    (404/403) ASP.NET Core ปฏิเสธด้วย 406 Not Acceptable แทน — client จะ
+    //    ได้ status ที่ไม่มีความหมายและไม่มี body ให้อ่านเลย
+    //    เส้นทางสำเร็จกำหนด content type เองผ่าน File() อยู่แล้ว
+    [HttpGet("ydoc")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDocument(Guid pageId, CancellationToken ct)
+    {
+        var result = await documents.GetBootstrapAsync(pageId, ct);
+        if (result.IsFailure) return result.ToActionResult();
+
+        var doc = result.Value;
+
+        Response.Headers["X-Doc-Role"] = doc.Role;
+        Response.Headers["X-Doc-Head-Seq"] = doc.HeadSeq.ToString();
+        Response.Headers["X-Doc-Snapshot-Up-To"] = doc.SnapshotUpToSeq.ToString();
+        Response.Headers["X-Doc-Updates-Since-Snapshot"] = doc.UpdatesSinceSnapshot.ToString();
+        Response.Headers["X-Doc-Should-Compact"] = doc.ShouldCompact ? "1" : "0";
+
+        // ห้าม cache — เนื้อหาเปลี่ยนตลอด และ header พวกนี้เป็น state ปัจจุบัน
+        Response.Headers.CacheControl = "no-store";
+
+        return File(doc.Frames, "application/octet-stream");
+    }
+
+    /// <summary>
+    /// ส่ง Yjs update เข้ามาต่อท้าย log
+    ///
+    /// Phase 1 ใช้ทางนี้ Phase 2 ย้ายไป SignalR แล้วเหลือทางนี้ไว้เป็นทางสำรอง
+    /// ตอน WebSocket ต่อไม่ได้
+    /// </summary>
+    [HttpPost("ydoc/update")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> AppendUpdate(
+        Guid pageId, [FromQuery] long? yClientId, CancellationToken ct)
+    {
+        var body = await ReadBodyAsync(ct);
+        if (body.IsFailure) return body.ToActionResult();
+
+        return (await documents.AppendUpdateAsync(pageId, body.Value, yClientId, ct))
+            .ToActionResult();
+    }
+
+    /// <summary>
+    /// snapshot ที่ client สร้าง (Y.encodeStateAsUpdate) — ใช้ compact log
+    /// ⚠️ เป็นจุดเดียวที่ client เขียนข้อมูลที่เซิร์ฟเวอร์ตรวจเนื้อหาไม่ได้
+    /// </summary>
+    [HttpPost("ydoc/snapshot")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SaveSnapshot(
+        Guid pageId, [FromQuery] long upToSeq, CancellationToken ct)
+    {
+        var body = await ReadBodyAsync(ct);
+        if (body.IsFailure) return body.ToActionResult();
+
+        return (await documents.SaveSnapshotAsync(pageId, body.Value, upToSeq, ct))
+            .ToActionResult();
+    }
+
+    /// <summary>
+    /// plain text ที่ client แกะจาก Y.Doc — ใช้ทำ index ค้นหาและ title ใน sidebar
+    /// client ควรส่งหลังผู้ใช้หยุดพิมพ์สักครู่ ไม่ใช่ทุก keystroke
+    /// </summary>
+    [HttpPost("projection")]
+    public async Task<IActionResult> SaveProjection(
+        Guid pageId, ProjectionRequest request, CancellationToken ct)
+        => (await documents.SaveProjectionAsync(pageId, request, ct)).ToActionResult();
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  อ่าน body แบบไบนารี
+    //
+    //  ใช้ [FromBody] ไม่ได้เพราะ body เป็นไบต์ดิบ ไม่ใช่ JSON
+    //  จำกัดขนาดเองเพราะไม่มี model binder มาทำให้
+    // ─────────────────────────────────────────────────────────────────────
+    private async Task<Result<byte[]>> ReadBodyAsync(CancellationToken ct)
+    {
+        if (Request.ContentLength > MaxBodyBytes)
+        {
+            return Error.Validation(
+                $"ข้อมูลใหญ่เกิน {MaxBodyBytes / 1024 / 1024} MB", "payload_too_large");
+        }
+
+        using var memory = new MemoryStream();
+        await Request.Body.CopyToAsync(memory, ct);
+
+        if (memory.Length > MaxBodyBytes)
+        {
+            return Error.Validation(
+                $"ข้อมูลใหญ่เกิน {MaxBodyBytes / 1024 / 1024} MB", "payload_too_large");
+        }
+
+        if (memory.Length == 0)
+        {
+            return Error.Validation("ไม่มีข้อมูลใน body", "empty_body");
+        }
+
+        return memory.ToArray();
+    }
+}

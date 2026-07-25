@@ -22,6 +22,21 @@ public class PageDocSnapshot
     /// <summary>เก็บแยกไว้เพื่อเทียบขนาดกับ snapshot ก่อนหน้า (guard กัน snapshot ที่หายข้อมูล)</summary>
     public int ByteSize { get; set; }
 
+    /// <summary>
+    /// snapshot นี้ใช้เสิร์ฟ bootstrap ได้หรือไม่
+    ///
+    /// ⚠️ คอลัมน์นี้เกิดจากบั๊กที่เทสจับได้: การ "เก็บไว้แต่ไม่ prune" อย่างเดียว
+    ///    ไม่พอ เพราะ bootstrap หยิบ snapshot ที่ up_to_seq สูงสุดมาเสิร์ฟ แล้ว
+    ///    ข้าม update ที่เก่ากว่านั้นไปทั้งหมด ผลคือข้อมูลยังอยู่ในฐานแต่ผู้ใช้
+    ///    เห็นหน้าว่าง ซึ่งแย่พอ ๆ กับข้อมูลหายจริง
+    ///
+    ///    snapshot ที่เล็กลงผิดปกติจึงถูกเก็บแบบ is_trusted = false: ไม่ใช้เสิร์ฟ
+    ///    ไม่ prune แต่ยังอยู่ให้ตรวจสอบ และใช้เป็น "พยาน" ให้ snapshot ตัวถัดไป
+    ///    ที่ขนาดใกล้กันได้ (ถ้ามีสองตัวที่เล็กเท่า ๆ กัน แปลว่าผู้ใช้ลบเนื้อหา
+    ///    จริง ไม่ใช่ client ส่งของไม่ครบ)
+    /// </summary>
+    public bool IsTrusted { get; set; } = true;
+
     public Guid? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
