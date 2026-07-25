@@ -1,7 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+    {
+      "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.e2e.json"
+    }
+  ],
+  "//": "paths ซ้ำกับ tsconfig.app.json โดยเจตนา — เครื่องมือภายนอกอย่าง shadcn CLI อ่านแค่ tsconfig.json ตัวนี้ ถ้าไม่มีมันจะสร้างโฟลเดอร์ชื่อ '@' ขึ้นมาจริง ๆ แทนที่จะ resolve alias",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  }
 }

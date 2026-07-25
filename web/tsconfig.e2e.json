@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
+    "target": "ES2023",
+
+    /* ⚠️ ต้องมี DOM ด้วย ไม่ใช่แค่ ES2023
+       โค้ดใน page.evaluate() รันในเบราว์เซอร์ จึงเรียก indexedDB / window ได้
+       ทั้งที่ไฟล์ตัวเองรันบน Node — ถ้าไม่ใส่ DOM จะได้ "Cannot find name
+       'indexedDB'" ทั้งที่โค้ดถูกต้อง */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+
+    "types": ["node"]
+  },
+  "include": ["e2e"]
+}

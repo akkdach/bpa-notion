@@ -24,7 +24,19 @@
     "noUncheckedSideEffectImports": true,
     /* index access คืน T | undefined — สำคัญมากกับ properties[propertyId] */
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+
+    /* ─────────────────────────────────────────────────────────────────────
+       exactOptionalPropertyTypes ปิดไว้โดยเจตนา
+
+       มันแยก `{ a?: string }` ออกจาก `{ a: string | undefined }` ซึ่งถูกต้อง
+       ในทางทฤษฎี แต่ไลบรารี React แทบทุกตัวไม่ได้เขียน type มาให้เข้ากันได้
+       — รวมถึงโค้ดที่ `npx shadcn add` generate ลงมาในโปรเจกต์เราเอง และ
+       BlockNote
+
+       การเปิดไว้แปลว่าต้องไล่แก้ไฟล์ที่ generate ใหม่ทุกครั้งที่เพิ่ม
+       component ซึ่งเป็นสงครามที่ไม่มีวันชนะและไม่ได้ความปลอดภัยกลับมาเท่ากับ
+       ที่เสียไป ตัวที่ให้ผลจริงคือ noUncheckedIndexedAccess ซึ่งยังเปิดอยู่
+       ───────────────────────────────────────────────────────────────────── */
 
     /* Path alias — ต้องตรงกับ vite.config.ts และ components.json */
     "baseUrl": ".",
