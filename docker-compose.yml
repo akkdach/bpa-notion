@@ -26,7 +26,14 @@ services:
       #    th-TH ICU locale ทำให้ `COLLATE "th-TH-x-icu"` เรียงคำไทยถูกต้อง
       POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=th-TH --encoding=UTF8
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # ⚠️ PostgreSQL 18+ mount ที่ /var/lib/postgresql ไม่ใช่ /var/lib/postgresql/data
+      #
+      #    image ตั้งแต่ 18 ขึ้นไปเก็บข้อมูลใน subdirectory ตาม major version
+      #    (/var/lib/postgresql/18/docker) เพื่อให้ `pg_upgrade --link` ทำงานได้
+      #    โดยไม่ติดขอบ mount point ถ้า mount ที่ .../data แบบเดิม entrypoint จะ
+      #    "ปฏิเสธการ start" พร้อม error ยาว ๆ ไม่ใช่แค่ warning
+      #    ดู https://github.com/docker-library/postgres/pull/1259
+      - pgdata:/var/lib/postgresql
       - ./db/init:/docker-entrypoint-initdb.d:ro
     ports:
       # ─────────────────────────────────────────────────────────────────
@@ -34,11 +41,14 @@ services:
       #  (api คุยกับ postgres ผ่าน network ภายในชื่อ `postgres:5432` อยู่แล้ว
       #   การเปิด port ออกมาข้างนอกมีไว้ให้ psql / DBeaver / dotnet ef ต่อได้)
       #
-      #  ⚠️ default เป็น 5433 ไม่ใช่ 5432 เพราะเครื่อง dev มักมี PostgreSQL
-      #     ของตัวเองรันอยู่บน 5432 แล้ว ถ้าใช้ 5432 จะ bind ไม่ติด — หรือแย่กว่า
-      #     คือ dotnet ef migrate ไปลง "ฐานผิดตัว" โดยไม่มีใครรู้
+      #  ⚠️ default ไม่ใช่ 5432 เพราะเครื่อง dev มักมี PostgreSQL ของตัวเอง
+      #     รันอยู่แล้ว ถ้า bind ทับ อย่างดีคือ start ไม่ขึ้น อย่างแย่คือ
+      #     `dotnet ef database update` ไปลง migration ผิดฐานโดยไม่มีใครรู้
+      #     และไม่ใช้ 5433 เพราะเป็นเลขที่ compose project อื่นเลือกกันบ่อย
+      #
+      #     เจอ "port is already allocated" → เปลี่ยน POSTGRES_HOST_PORT ใน .env
       # ─────────────────────────────────────────────────────────────────
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
+      - "${POSTGRES_HOST_PORT:-5440}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-projectmanagement}"]
       interval: 10s

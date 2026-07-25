@@ -163,10 +163,45 @@ docker compose exec postgres psql -U postgres -d projectmanagement \
 
 ---
 
+## ⚠️ PGroonga: ต้องระบุ tokenizer ทุก index
+
+ทดสอบจริงใน Phase 0 แล้ว — **ค่า default ทำให้ค้นภาษาไทยพังแบบเงียบ ๆ**
+
+```sql
+-- ❌ ผิด: ตัดคำด้วยช่องว่างแล้ว prefix match
+--    ภาษาไทยไม่มีช่องว่างระหว่างคำ → ทั้งประโยคกลายเป็น token เดียว
+--    ค้น "ข้าวผัด" ใน "สูตรข้าวผัดกระเพราไก่" → ได้ 0 แถว
+CREATE INDEX … USING pgroonga (search_text);
+
+-- ✅ ถูก
+CREATE INDEX … USING pgroonga (search_text)
+  WITH (tokenizer = 'TokenNgram("n", 2, "unify_alphabet", false)');
+```
+
+กับดักคือ **คำที่อยู่ต้นประโยคจะค้นเจอ** (`ยอดขาย` เจอเพราะเป็น prefix ของ
+`ยอดขายเครื่องดื่ม…`) ถ้า test corpus ใช้คำต้นประโยคหมด จะผ่านเทสแล้วขึ้น production พร้อมบั๊ก
+
+เปลี่ยน tokenizer ทีหลังต้อง `REINDEX` ทั้งตาราง → ต้องตั้งให้ถูกตั้งแต่ migration แรก
+ตารางผลทดสอบเต็มอยู่ใน [PLAN.md](PLAN.md) หัวข้อ Phase 6
+
+---
+
 ## สถานะ
 
-**Phase 0 เสร็จ** — scaffolding, infra, CI gates ทั้ง 13 ตัวทดสอบแล้ว, health check วิ่งผ่าน
-layer ครบ (Controller → Repository → PostgreSQL)
+**Phase 0 เสร็จและ verify ครบ**
+
+| | |
+|---|---|
+| `dotnet build` Release | ✅ 0 warning (เปิด `TreatWarningsAsErrors`) |
+| `tsc -b` / `eslint` / `vite build` | ✅ |
+| Architecture gates 13 ตัว | ✅ ทุกตัวพิสูจน์แล้วว่าแดงจริงเมื่อละเมิด |
+| `docker compose up --wait` | ✅ ทุก container healthy |
+| pgroonga 4.0.6 · pgcrypto 1.4 · citext 1.8 | ✅ |
+| PostgreSQL 18.3 + ICU `datlocale=th-TH` | ✅ เรียงคำไทยถูกตามพจนานุกรม |
+| PGroonga ค้นไทยด้วย bigram + score + snippet | ✅ ไม่ over-match, ใช้ Index Scan |
+| health 200 ทั้ง `:5080` และผ่าน nginx `:80/api` | ✅ |
+| SPA fallback (`/w/acme/page/abc`) | ✅ 200 |
+| nginx route `/hubs` → api | ✅ 404 จาก API ไม่ใช่ 502 จาก nginx |
 
 **ถัดไป: Phase 1** — walking skeleton: register → login → สร้าง workspace → nested page
 ใน sidebar → พิมพ์ใน BlockNote → refresh แล้วเนื้อหายังอยู่
@@ -179,3 +214,6 @@ layer ครบ (Controller → Repository → PostgreSQL)
   BlockNote / Yjs / motion ออกใน Phase 1 ก่อนที่มันจะโตกว่านี้
 - `MaximumReceiveMessageSize` ตั้งไว้ 4 MB แล้วแต่ยังไม่มี hub ให้ทดสอบ — ต้องยืนยัน
   ตอน Phase 2 ว่า client ที่ offline กลับมา push full state ได้จริง
+- ยังไม่มี test project — Phase 1 ต้องเริ่มด้วย `tests/ProjectManagementAPI.Tests/`
+  พร้อม `[Theory]` route table สำหรับ tenant isolation (CI workflow เตรียม step ไว้แล้ว)
+- PGroonga ยังทดสอบแค่ corpus 5 แถว — Phase 6 ต้องวัด recall และขนาด index ที่ ~2,000 หน้า

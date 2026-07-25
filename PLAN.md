@@ -511,9 +511,14 @@ page_search(
   search_text text generated always as (title || ' ' || body_text) stored,
   updated_at timestamptz not null default now()
 );
-create index page_search_body_pgrn  on page_search using pgroonga (search_text);
-create index page_search_title_pgrn on page_search using pgroonga (title);   -- title boost
-create index page_search_scope      on page_search (workspace_id, access_root_id);
+-- ⚠️ tokenizer ต้องระบุเสมอ — ยืนยันด้วยการทดลองจริงใน Phase 0 (ดูด้านล่าง)
+--    ถ้าไม่ระบุ PGroonga จะตัดคำด้วยช่องว่างแล้วทำ prefix match ซึ่งกับภาษาไทย
+--    ที่ไม่มีช่องว่างระหว่างคำ = ค้นเจอเฉพาะคำที่อยู่ต้น "ก้อน" เท่านั้น
+create index page_search_body_pgrn on page_search using pgroonga (search_text)
+  with (tokenizer = 'TokenNgram("n", 2, "unify_alphabet", false)');
+create index page_search_title_pgrn on page_search using pgroonga (title)   -- title boost
+  with (tokenizer = 'TokenNgram("n", 2, "unify_alphabet", false)');
+create index page_search_scope on page_search (workspace_id, access_root_id);
 ```
 
 **Canonical JSONB value encoding** — write it down once, version it (`properties` carries `"_v": 1`):
@@ -923,18 +928,53 @@ different properties of the same row from two clients and assert both survive (p
 For 4c: unit-test the parser against a fixture table of expressions, and assert a self-referencing formula
 is rejected at save time with the cycle named.
 
-**Phase 6 — verify PGroonga on Thai before building UI on top of it (half a day, do it first):**
+**Phase 6 — PGroonga on Thai: ✅ VERIFIED in Phase 0, and the finding changed the design.**
+
+This was the plan's biggest unknown, so it was tested against `groonga/pgroonga:4.0.6-debian-18` before
+anything was built on top of it. Result: **PGroonga works correctly on Thai — but only if the tokenizer is
+declared explicitly. The default is silently broken for Thai.**
+
+With a plain `USING pgroonga (search_text)` index, searching a 5-row Thai corpus gave:
+
+| query | expected | default tokenizer | explicit bigram |
+|---|---|---|---|
+| `ข้าวผัด` | row 1 | ❌ 0 rows | ✅ row 1 |
+| `กระเพรา` | row 1 | ❌ 0 rows | ✅ row 1 |
+| `ไก่` | rows 1, 3 | ❌ 0 rows | ✅ rows 1, 3 |
+| `ผัด` | rows 1, 5 | — | ✅ rows 1, 5 |
+| `ยอดขาย` | row 2 | ✅ row 2 | ✅ row 2 |
+| `chicken` | row 3 | ✅ row 3 | ✅ row 3 |
+| `sprint` | row 4 | ✅ row 4 | ✅ row 4 |
+| `กระเพรา ไก่` (AND) | row 1 | — | ✅ row 1 |
+| `รถยนต์` (over-match probe) | 0 | ✅ 0 | ✅ 0 |
+
+The default tokenizer splits on **whitespace** and then prefix-matches. Thai has no whitespace between
+words, so a whole Thai clause becomes one token and only queries that happen to be a *prefix* of that token
+match. That is why `ยอดขาย` "worked" — it is a prefix of `ยอดขายเครื่องดื่มเพิ่มขึ้น` — while `ข้าวผัด`
+(mid-token) returned nothing. **A test corpus that happened to use prefix terms would have passed and shipped
+broken search.**
+
+The fix is one clause, and it is now mandatory on every PGroonga index in this project:
+
 ```sql
-SELECT pgroonga_tokenize('ผมชอบกินข้าวผัดกระเพราไก่');
+WITH (tokenizer = 'TokenNgram("n", 2, "unify_alphabet", false)')
 ```
-Run against the default tokenizer, then `TokenNgram("n", 2, "unify_alphabet", false)` and
-`TokenBigramSplitSymbolAlphaDigit`. `TokenBigram` treats Latin as whitespace-delimited words but non-Latin
-as bigrams — the behaviour you want for mixed Thai/English, but **confirm empirically with your own
-content.** Changing `tokenizer=`/`normalizer=` later requires a `REINDEX`. Then insert ~2,000 realistic Thai
-pages and compare recall on `ข้าวผัด`, `กระเพรา`, mixed `ไก่ chicken`, and a 2-char prefix against a
-`LIKE '%…%'` baseline. **If PGroonga isn't clearly better, trigger the Meilisearch contingency** — a sidecar
-container with excellent Thai handling; the projection endpoint is already the single write point to fan out
-from, so it's a contained swap, not a redesign. Do *not* reach for Elasticsearch on an on-prem VM.
+
+Also confirmed: relevance scoring via `pgroonga_score(tableoid, ctid)` and
+`pgroonga_snippet_html(body, pgroonga_query_extract_keywords(...))` both work on Thai (the snippet correctly
+wrapped `ผัดกระเพรา`), and `EXPLAIN` shows a real `Index Scan`, not a filtered seq scan.
+
+Two corrections to earlier assumptions: `pgroonga_tokenize` is `(text, VARIADIC text[]) -> json[]` and needs
+at least one option argument (`VARIADIC ARRAY[]::text[]` for none); and `TokenBigram` bigrams Latin runs too
+rather than keeping them as whole words — harmless, since English queries still resolve correctly.
+
+Changing `tokenizer=` later requires a `REINDEX`, so it is set from the first migration.
+
+Remaining Phase 6 work: insert ~2,000 realistic Thai pages and compare recall against a `LIKE '%…%'`
+baseline at that scale, and confirm bigram index size is acceptable on long documents.
+**Meilisearch stays the contingency** if recall disappoints at volume — the projection endpoint is already
+the single write point to fan out from, so it is a contained swap, not a redesign. Do *not* reach for
+Elasticsearch on an on-prem VM.
 
 ---
 
@@ -975,16 +1015,40 @@ from, so it's a contained swap, not a redesign. Do *not* reach for Elasticsearch
     standard**, which is why they belong in Phase 0 rather than Phase 9. The specific temptation to expect is
     a one-line `_db.Pages.Where(...)` inside a controller at 2am in Phase 4 — that is exactly the query that
     skips the tenant filter and the permission check. Let the build stop you.
-12. **~6 months solo is the honest number**, with the block editor bought off the shelf. If that's not the
+12. **PGroonga's default tokenizer silently breaks Thai search** — *confirmed in Phase 0, not theoretical.*
+    Every PGroonga index **must** carry `WITH (tokenizer = 'TokenNgram("n", 2, "unify_alphabet", false)')`.
+    Without it, whitespace tokenization + prefix matching means a query only matches when it happens to be a
+    prefix of a whole Thai clause. The trap: a test corpus built from prefix terms passes, so the bug reaches
+    production. Changing the tokenizer later needs a full `REINDEX`. See the Phase 6 verification table.
+13. **~6 months solo is the honest number**, with the block editor bought off the shelf. If that's not the
     budget, the ruthless cut is Phases 0–3 + 5 + 6 (≈9 weeks): a genuinely good collaborative nested-page
     wiki with Thai search and proper multi-tenant permissions, no databases. That ships as a real product on
     its own and beats a half-built database view.
 
+### Resolved in Phase 0 (was "still to verify")
+
+- ✅ **PGroonga tokenizer for Thai** — `TokenNgram("n", 2, "unify_alphabet", false)`, and it is
+  **mandatory**: the default tokenizer silently returns nothing for mid-token Thai queries. Full evidence in
+  the Phase 6 verification section above. This is now Risk #13.
+- ✅ **`groonga/pgroonga:4.0.6-debian-18` works.** `pgroonga 4.0.6` / `pgcrypto 1.4` / `citext 1.8` install
+  cleanly from `/docker-entrypoint-initdb.d`, server reports `18.3 (Debian 18.3-1.pgdg13+1)`. No need to
+  fall back to PG 17.
+- ✅ **`POSTGRES_INITDB_ARGS` ICU locale takes effect** — `datlocprovider=i`, `datlocale=th-TH`. Thai
+  dictionary ordering verified against byte order: ICU gives `กระเพรา · เก้าอี้ · ไก่ · ข้าวผัด · โต๊ะ`
+  (correct — leading vowels reorder under their consonant) versus `C` collation's
+  `กระเพรา · ข้าวผัด · เก้าอี้ · โต๊ะ · ไก่`.
+- ⚠️ **PostgreSQL 18 changed the data-directory convention** — mount the volume at
+  `/var/lib/postgresql`, **not** `/var/lib/postgresql/data`. With the old mount point the 18+ entrypoint
+  **refuses to start** (long error, not a warning) because data now lives in a major-version subdirectory so
+  that `pg_upgrade --link` works across mount boundaries. Every pre-18 compose example on the internet has
+  the old path.
+
 ### Still to verify during the build
-- Exact PGroonga `tokenizer` / `normalizer` for Thai (Phase 6, before the search UI).
-- `HttpConnectionDispatcherOptions.CloseOnAuthenticationExpiration` name/placement on .NET 10.
-- Whether `groonga/pgroonga` PG-18 images are as well-trodden as PG-17 — `4.0.6-debian-17` is the safer
-  fallback and the whole stack can drop to PG 17 with no design change.
+- `HttpConnectionDispatcherOptions.CloseOnAuthenticationExpiration` name/placement on .NET 10 (Phase 2).
+- PGroonga bigram index size and recall at ~2,000+ real Thai pages (Phase 6) — small-corpus correctness is
+  proven, volume behaviour is not.
+- Whether the 4 MB `MaximumReceiveMessageSize` is actually enough for a full-state push from a long offline
+  session (Phase 2).
 
 ---
 

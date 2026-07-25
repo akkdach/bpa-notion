@@ -120,11 +120,31 @@ jobs:
           grep -qx pgcrypto extensions.txt
           grep -qx citext   extensions.txt
 
-      - name: th-TH ICU collation ต้องใช้ได้
+      - name: ICU locale ต้องเป็น th-TH (POSTGRES_INITDB_ARGS ทำงานจริง)
         run: |
           docker compose exec -T postgres \
             psql -U postgres -d projectmanagement -t -A \
-            -c "SELECT 'ก' < 'ข' COLLATE \"th-TH-x-icu\""
+            -c "SELECT datlocprovider::text || ' ' || datlocale FROM pg_database WHERE datname='projectmanagement'" \
+            | tee locale.txt
+          grep -q '^i th-TH$' locale.txt
+
+      # ─────────────────────────────────────────────────────────────────────
+      #  Thai search — regression gate
+      #
+      #  PGroonga ค้นภาษาไทยถูกเฉพาะเมื่อ index ระบุ tokenizer เท่านั้น
+      #  ค่า default พังแบบเงียบ ๆ (ดู db/probe/thai-search-probe.sql)
+      #  gate นี้จับกรณีที่มีคนสร้าง index ใหม่โดยลืม WITH (tokenizer = …)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Thai full-text search probe ต้อง PASS ทุกเคส
+        run: |
+          docker compose exec -T postgres \
+            psql -U postgres -d projectmanagement -v ON_ERROR_STOP=1 \
+            < db/probe/thai-search-probe.sql | tee probe.txt
+          if grep -q 'FAIL' probe.txt; then
+            echo "::error::Thai search probe มีเคสที่ FAIL — ตรวจว่า index ระบุ tokenizer แล้วหรือยัง"
+            exit 1
+          fi
+          test "$(grep -c 'PASS' probe.txt)" -ge 10
 
       - name: API health ต้องตอบ 200
         run: |
