@@ -1,3 +1,4 @@
+using ProjectManagementAPI.Data;
 using ProjectManagementAPI.Repositories;
 using ProjectManagementAPI.Repositories.Abstractions;
 
@@ -14,18 +15,30 @@ public static class ApplicationServicesConfiguration
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
+        // ─── Tenant context ──────────────────────────────────────────────
+        // instance เดียวต่อ request — ทั้ง ITenantContext (อ่าน) และ
+        // ITenantContextSetter (เขียน) ต้องชี้ไปที่ object เดียวกัน ไม่งั้น
+        // middleware จะเซ็ตค่าใส่ instance ที่ DbContext ไม่ได้เห็น
+        services.AddScoped<TenantContext>();
+        services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<TenantContext>());
+        services.AddScoped<ITenantContextSetter>(sp => sp.GetRequiredService<TenantContext>());
+
+        // ทางเดียวที่ข้าม Tenant filter ได้โดยเจตนา
+        services.AddScoped<IIdentityQueries, IdentityQueries>();
+
+        // ทางเดียวที่ raw SQL ควรวิ่งผ่าน (บังคับใส่ workspace_id ให้)
+        services.AddScoped<IScopedSql, ScopedSql>();
+
         // ─── Repositories ────────────────────────────────────────────────
         // ที่เดียวที่แตะ AppDbContext ได้ (บังคับด้วย CI gate)
         services.AddScoped<IHealthRepository, HealthRepository>();
 
-        // Phase 1
+        // Phase 1 — เติมทีละ stage
         // services.AddScoped<IUserRepository, UserRepository>();
         // services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         // services.AddScoped<IPageRepository, PageRepository>();
 
         // ─── Services ────────────────────────────────────────────────────
-        // Phase 1
-        // services.AddScoped<ITenantContext, TenantContext>();
         // services.AddScoped<ITokenService, TokenService>();
         // services.AddSingleton<IPasswordHasher, PasswordHasher>();
         // services.AddScoped<IPermissionService, PermissionService>();

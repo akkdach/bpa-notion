@@ -38,4 +38,15 @@
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- ─────────────────────────────────────────────────────────────────
+         SQL ที่ EF migrations เขียนไม่ได้ (partial index, GIN, PGroonga,
+         CHECK constraint, generated column)
+
+         ฝังเป็น embedded resource ไม่ใช่อ่านจาก disk เพราะ container ไม่ได้
+         copy ไฟล์ .sql ไปด้วย และ path ตอน `dotnet ef` ต่างจากตอน runtime
+         ───────────────────────────────────────────────────────────────── -->
+    <EmbeddedResource Include="Data\Migrations\Sql\*.sql" />
+  </ItemGroup>
+
 </Project>
