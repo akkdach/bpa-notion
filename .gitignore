@@ -1,0 +1,54 @@
+# ═══════════════════════════════════════════════════════════
+#  .NET  (api/)
+# ═══════════════════════════════════════════════════════════
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+*.received.*
+
+# ═══════════════════════════════════════════════════════════
+#  Node  (web/)
+# ═══════════════════════════════════════════════════════════
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# ═══════════════════════════════════════════════════════════
+#  Secrets — .env.example is the only env file that is tracked
+# ═══════════════════════════════════════════════════════════
+.env
+.env.uat
+.env.production
+.env.*.local
+!.env.example
+!web/.env
+!web/.env.uat
+!web/.env.production
+
+# ═══════════════════════════════════════════════════════════
+#  Runtime artefacts
+# ═══════════════════════════════════════════════════════════
+backups/
+uploads/
+
+# ═══════════════════════════════════════════════════════════
+#  Editors / OS
+# ═══════════════════════════════════════════════════════════
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# VS Code: keep shared settings, ignore personal ones
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

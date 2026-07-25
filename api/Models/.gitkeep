@@ -1,0 +1,1 @@
+# EF Core entities เท่านั้น — ห้ามมี logic, ห้ามหลุดออกนอก service layer

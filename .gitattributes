@@ -1,0 +1,27 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  เก็บใน repo เป็น LF เสมอ — checkout บน Windows แปลงเป็น CRLF ตามปกติได้
+#  แต่ไฟล์ที่ถูกใช้ใน Linux container ต้องเป็น LF เท่านั้น
+# ═══════════════════════════════════════════════════════════════════════════
+* text=auto eol=lf
+
+# ต้องเป็น LF เด็ดขาด — CRLF ทำให้ shebang และ nginx/psql พังใน container
+*.sh            text eol=lf
+*.mjs           text eol=lf
+*.sql           text eol=lf
+Dockerfile      text eol=lf
+*.conf          text eol=lf
+.env*           text eol=lf
+
+# binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.pdf binary
+
+# lockfile / generated — ยุบใน diff ของ PR
+package-lock.json -diff linguist-generated

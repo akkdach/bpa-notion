@@ -1,0 +1,148 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  ProjectManagement — dev / on-prem default
+#
+#  ไม่มี key `version:` — obsolete ใน Compose v2 (Docker 29.x) และจะขึ้น warning
+#
+#  ⚠️ ไม่มี Node service ที่นี่โดยเจตนา — realtime วิ่งผ่าน SignalR ใน .NET
+#     (ดู PLAN.md "The realtime CRDT decision")
+# ═══════════════════════════════════════════════════════════════════════════
+name: projectmanagement
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  #  PostgreSQL 18 + PGroonga
+  #  image นี้ build บน official `postgres` image → POSTGRES_* และ
+  #  /docker-entrypoint-initdb.d ใช้ได้ตามปกติ
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: groonga/pgroonga:4.0.6-debian-18
+    container_name: pm-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-projectmanagement}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — cp .env.example .env}
+      # ⚠️ ตั้งได้ครั้งเดียวตอน initdb — เปลี่ยนทีหลังต้อง dump/restore ทั้งฐาน
+      #    th-TH ICU locale ทำให้ `COLLATE "th-TH-x-icu"` เรียงคำไทยถูกต้อง
+      POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=th-TH --encoding=UTF8
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # ─────────────────────────────────────────────────────────────────
+      #  dev เท่านั้น — ลบบรรทัดนี้ตอน production
+      #  (api คุยกับ postgres ผ่าน network ภายในชื่อ `postgres:5432` อยู่แล้ว
+      #   การเปิด port ออกมาข้างนอกมีไว้ให้ psql / DBeaver / dotnet ef ต่อได้)
+      #
+      #  ⚠️ default เป็น 5433 ไม่ใช่ 5432 เพราะเครื่อง dev มักมี PostgreSQL
+      #     ของตัวเองรันอยู่บน 5432 แล้ว ถ้าใช้ 5432 จะ bind ไม่ติด — หรือแย่กว่า
+      #     คือ dotnet ef migrate ไปลง "ฐานผิดตัว" โดยไม่มีใครรู้
+      # ─────────────────────────────────────────────────────────────────
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-projectmanagement}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [app-network]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  ASP.NET Core API + SignalR hub
+  # ─────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: pm-api
+    restart: always
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-projectmanagement};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD};Include Error Detail=true
+      Jwt__Key: ${JWT_SECRET:?JWT_SECRET is required}
+      Jwt__Issuer: ${JWT_ISSUER:-ProjectManagementAPI}
+      Jwt__ExpiresIn: ${JWT_EXPIRES_IN:-24h}
+      Jwt__RefreshExpiresIn: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      Cors__AllowedOrigins__0: ${WEB_ORIGIN:-http://localhost}
+      Uploads__RootPath: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks: [app-network]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  React SPA served by nginx, which also reverse-proxies /api and /hubs
+  #  → เบราว์เซอร์เห็น origin เดียว → ไม่มี CORS, ไม่ติดปัญหา
+  #    AllowAnyOrigin + AllowCredentials ที่ SignalR ต้องใช้
+  # ─────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_HUB_URL: ${VITE_HUB_URL:-/hubs/doc}
+    container_name: pm-web
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+    networks: [app-network]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  Nightly logical backup — on-prem ไม่มี managed snapshot ให้พึ่ง
+  #  tag ต้องตรง major version ของ server (PG 18 server ต้องใช้ pg_dump 18)
+  # ─────────────────────────────────────────────────────────────────────────
+  db-backup:
+    image: prodrigestivill/postgres-backup-local:18
+    container_name: pm-db-backup
+    restart: always
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-projectmanagement}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: "14"
+      BACKUP_KEEP_WEEKS: "8"
+      BACKUP_KEEP_MONTHS: "6"
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app-network]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  Phase 9 — SignalR backplane เมื่อรัน api หลาย instance
+  #  จนถึงตอนนั้น in-memory group ของ SignalR พอแล้ว
+  # ─────────────────────────────────────────────────────────────────────────
+  # redis:
+  #   image: redis:8-alpine
+  #   container_name: pm-redis
+  #   restart: always
+  #   command: ["redis-server", "--appendonly", "yes"]
+  #   volumes: [redisdata:/data]
+  #   networks: [app-network]
+
+volumes:
+  pgdata:
+  uploads:
+  # redisdata:
+
+networks:
+  app-network:
+    driver: bridge

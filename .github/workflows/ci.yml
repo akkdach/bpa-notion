@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# ยกเลิก run เก่าเมื่อ push ใหม่บน branch เดิม
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ═════════════════════════════════════════════════════════════════════════
+  #  Architecture gates — job แยกและรันก่อน เพราะเร็วที่สุด (ไม่ต้อง build)
+  #  และเพราะการละเมิด layer เป็นเรื่องที่ต้องรู้ก่อนอย่างอื่น
+  # ═════════════════════════════════════════════════════════════════════════
+  architecture:
+    name: Architecture gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: node scripts/check-architecture.mjs
+
+  # ═════════════════════════════════════════════════════════════════════════
+  #  API
+  # ═════════════════════════════════════════════════════════════════════════
+  api:
+    name: API (net10.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        working-directory: api
+        run: dotnet restore
+
+      # TreatWarningsAsErrors เปิดอยู่ใน csproj — warning ใด ๆ ทำให้ build แดง
+      - name: Build
+        working-directory: api
+        run: dotnet build --no-restore --configuration Release
+
+      # Phase 1 ขึ้นไป: xUnit + Testcontainers.PostgreSql
+      # (Testcontainers ใช้ Docker ซึ่ง ubuntu-latest runner มีให้แล้ว)
+      - name: Test
+        working-directory: api
+        run: |
+          if [ -d ../tests ]; then
+            dotnet test ../tests --configuration Release
+          else
+            echo "ยังไม่มี test project (Phase 0) — ข้าม"
+          fi
+
+  # ═════════════════════════════════════════════════════════════════════════
+  #  Web — lint คือที่อยู่ของ layer gate ฝั่ง frontend
+  # ═════════════════════════════════════════════════════════════════════════
+  web:
+    name: Web (React 19)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # eslint-plugin-boundaries + no-restricted-imports (axios)
+      - name: Lint (รวม layer boundaries)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npx vite build
+
+  # ═════════════════════════════════════════════════════════════════════════
+  #  Docker — พิสูจน์ว่า compose stack ขึ้นได้และ health เขียว
+  #  นี่คือ test ที่จับปัญหาที่ build ธรรมดาจับไม่ได้: extension หาย,
+  #  nginx proxy ผิด, connection string ผิด
+  # ═════════════════════════════════════════════════════════════════════════
+  compose:
+    name: docker compose smoke test
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: เตรียม .env
+        run: |
+          cp .env.example .env
+          # ค่าจริงสำหรับ CI — ไม่ใช่ค่า placeholder
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=ci_$(openssl rand -hex 16)|" .env
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')|" .env
+
+      - name: docker compose up
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: pgroonga ต้องติดตั้งอยู่จริง
+        run: |
+          docker compose exec -T postgres \
+            psql -U postgres -d projectmanagement -t -A \
+            -c "SELECT extname FROM pg_extension ORDER BY extname" | tee extensions.txt
+          grep -qx pgroonga extensions.txt
+          grep -qx pgcrypto extensions.txt
+          grep -qx citext   extensions.txt
+
+      - name: th-TH ICU collation ต้องใช้ได้
+        run: |
+          docker compose exec -T postgres \
+            psql -U postgres -d projectmanagement -t -A \
+            -c "SELECT 'ก' < 'ข' COLLATE \"th-TH-x-icu\""
+
+      - name: API health ต้องตอบ 200
+        run: |
+          code=$(curl -s -o health.json -w '%{http_code}' http://localhost:5080/api/v1/health)
+          cat health.json
+          test "$code" = "200"
+
+      - name: nginx ต้อง proxy /api ไปที่ api ได้
+        run: |
+          code=$(curl -s -o proxied.json -w '%{http_code}' http://localhost/api/v1/health)
+          cat proxied.json
+          test "$code" = "200"
+
+      - name: SPA fallback ต้องทำงาน (deep link ไม่ 404)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost/w/acme/page/abc)
+          test "$code" = "200"
+
+      - name: เก็บ log เมื่อล้มเหลว
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+      - name: ปิด stack
+        if: always()
+        run: docker compose down -v

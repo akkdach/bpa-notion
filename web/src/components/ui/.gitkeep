@@ -1,0 +1,1 @@
+# shadcn primitives — npx shadcn@4 add button input dialog … ห้าม import จาก features/, page/, service/ (CI บังคับ)
