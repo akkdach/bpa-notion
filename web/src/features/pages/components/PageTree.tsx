@@ -3,6 +3,7 @@ import { ChevronRight, FileText, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/store/uiStore'
 import type { TreeNode } from '../hooks/usePageTree'
+import { StatusChip } from './StatusChip'
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  PageTree — presentational
@@ -15,9 +16,17 @@ interface PageTreeProps {
   onSelect: (pageId: string) => void
   onCreateChild: (parentId: string) => void
   onDelete: (pageId: string) => void
+  onCycleStatus: (pageId: string) => void
 }
 
-export function PageTree({ nodes, activePageId, onSelect, onCreateChild, onDelete }: PageTreeProps) {
+export function PageTree({
+  nodes,
+  activePageId,
+  onSelect,
+  onCreateChild,
+  onDelete,
+  onCycleStatus,
+}: PageTreeProps) {
   if (nodes.length === 0) {
     return (
       <p className="px-3 py-6 text-center text-sm text-muted-foreground">
@@ -36,18 +45,20 @@ export function PageTree({ nodes, activePageId, onSelect, onCreateChild, onDelet
           onSelect={onSelect}
           onCreateChild={onCreateChild}
           onDelete={onDelete}
+          onCycleStatus={onCycleStatus}
         />
       ))}
     </ul>
   )
 }
 
-function PageTreeItem({ node, activePageId, onSelect, onCreateChild, onDelete }: {
+function PageTreeItem({ node, activePageId, onSelect, onCreateChild, onDelete, onCycleStatus }: {
   node: TreeNode
   activePageId?: string | undefined
   onSelect: (pageId: string) => void
   onCreateChild: (parentId: string) => void
   onDelete: (pageId: string) => void
+  onCycleStatus: (pageId: string) => void
 }) {
   const expandedPageIds = useUiStore((s) => s.expandedPageIds)
   const togglePageExpanded = useUiStore((s) => s.togglePageExpanded)
@@ -89,10 +100,27 @@ function PageTreeItem({ node, activePageId, onSelect, onCreateChild, onDelete }:
           <span aria-hidden className="shrink-0">
             {node.icon ?? <FileText className="size-3.5 text-muted-foreground" />}
           </span>
-          <span className="truncate">
+          <span className={cn('truncate', node.status === 'done' && 'text-muted-foreground line-through')}>
             {node.title.length > 0 ? node.title : 'ไม่มีชื่อ'}
           </span>
         </button>
+
+        {/* หน้าที่เป็นงานแล้วโชว์ chip ตลอด — หน้าธรรมดาโชว์จาง ๆ ตอน hover
+            เพื่อให้ "ทำหน้านี้เป็นงาน" หาได้ โดยไม่รบกวน sidebar ของคนที่
+            ไม่ได้ใช้ระบบสถานะเลย */}
+        <span
+          className={cn(
+            'shrink-0',
+            node.status === undefined &&
+              'opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100',
+          )}
+        >
+          <StatusChip
+            status={node.status}
+            onCycle={() => onCycleStatus(node.id)}
+            showWhenUnset
+          />
+        </span>
 
         <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button
@@ -131,6 +159,7 @@ function PageTreeItem({ node, activePageId, onSelect, onCreateChild, onDelete }:
                 onSelect={onSelect}
                 onCreateChild={onCreateChild}
                 onDelete={onDelete}
+                onCycleStatus={onCycleStatus}
               />
             ))}
           </motion.ul>

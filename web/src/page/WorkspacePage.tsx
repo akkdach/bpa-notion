@@ -1,11 +1,21 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { Loader2, Plus } from 'lucide-react'
+import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AppShell } from '@/components/layout/AppShell'
 import { useUiStore } from '@/store/uiStore'
 import { useAuth } from '@/features/auth'
 import { WorkspaceSwitcher, useCreateWorkspace } from '@/features/workspace'
-import { PageTree, buildTree, useCreatePage, useDeletePage, usePageTree } from '@/features/pages'
+import {
+  PageTree,
+  RecentChanges,
+  buildTree,
+  nextStatus,
+  useCreatePage,
+  useDeletePage,
+  usePageTree,
+  useUpdatePage,
+} from '@/features/pages'
+import type { PageNode } from '@/features/pages'
 import { PageView } from './PageView'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -27,6 +37,7 @@ export function WorkspacePage() {
   const createWorkspace = useCreateWorkspace()
   const createPage = useCreatePage()
   const deletePage = useDeletePage()
+  const updatePage = useUpdatePage()
   const tree = usePageTree()
 
   const canEdit = currentWorkspace !== null && currentWorkspace.role !== 'guest'
@@ -122,19 +133,66 @@ export function WorkspacePage() {
                 },
               })
             }}
+            onCycleStatus={(id) => {
+              // อ่านสถานะจาก cache ที่ tree ใช้อยู่ ไม่ใช่จาก tree ที่ประกอบแล้ว
+              // เพื่อให้ค่าที่ใช้คำนวณสถานะถัดไปเป็นค่าเดียวกับที่แสดงอยู่จริง
+              const current = tree.data?.find((node) => node.id === id)?.status
+              updatePage.mutate({ pageId: id, input: { status: nextStatus(current) } })
+            }}
           />
         )
       }
+      sidebarFooter={
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 text-muted-foreground"
+          onClick={() => void navigate('/trash')}
+        >
+          <Trash2 className="size-4" aria-hidden />
+          ถังขยะ
+        </Button>
+      }
     >
-      {pageId === undefined ? <EmptyState /> : <PageView pageId={pageId} />}
+      {pageId === undefined ? (
+        <Home
+          nodes={tree.data ?? []}
+          currentUserId={user?.id}
+          onSelect={(id) => void navigate(`/p/${id}`)}
+        />
+      ) : (
+        <PageView pageId={pageId} />
+      )}
     </AppShell>
   )
 }
 
-function EmptyState() {
+// ═══════════════════════════════════════════════════════════════════════════
+//  หน้าแรกเมื่อยังไม่ได้เลือกหน้าไหน
+//
+//  เดิมเป็นข้อความ "เลือกหน้าจากแถบด้านซ้าย" กลางจอเปล่า ๆ ซึ่งเป็นพื้นที่ที่
+//  เปิดแอปมาแล้วเห็นก่อนทุกครั้ง — เอามาใช้บอกว่ามีอะไรเปลี่ยนไปบ้างคุ้มกว่า
+//  โดยเฉพาะเมื่อ AI แก้งานอยู่เบื้องหลัง
+// ═══════════════════════════════════════════════════════════════════════════
+function Home({ nodes, currentUserId, onSelect }: {
+  nodes: PageNode[]
+  currentUserId?: string | undefined
+  onSelect: (pageId: string) => void
+}) {
+  if (nodes.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-muted-foreground">
+          ยังไม่มีหน้า — กด “หน้าใหม่” ที่แถบด้านซ้าย
+        </p>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-muted-foreground">เลือกหน้าจากแถบด้านซ้าย</p>
+    <div className="mx-auto w-full max-w-3xl p-6">
+      <h1 className="mb-4 text-lg font-semibold">เปลี่ยนแปลงล่าสุด</h1>
+      <RecentChanges nodes={nodes} currentUserId={currentUserId} onSelect={onSelect} />
     </div>
   )
 }

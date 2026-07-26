@@ -19,6 +19,8 @@ import { cn } from '@/lib/utils'
 interface AppShellProps {
   sidebarHeader: ReactNode
   sidebarBody: ReactNode
+  /** ท้ายแถบด้านข้าง — อยู่นอก ScrollArea จึงติดอยู่กับที่เมื่อรายการหน้ายาว */
+  sidebarFooter?: ReactNode
   children: ReactNode
   sidebarWidth: number
   collapsed: boolean
@@ -26,7 +28,8 @@ interface AppShellProps {
 }
 
 export function AppShell({
-  sidebarHeader, sidebarBody, children, sidebarWidth, collapsed, onToggleSidebar,
+  sidebarHeader, sidebarBody, sidebarFooter, children,
+  sidebarWidth, collapsed, onToggleSidebar,
 }: AppShellProps) {
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -43,6 +46,13 @@ export function AppShell({
               {sidebarBody}
             </nav>
           </ScrollArea>
+
+          {sidebarFooter !== undefined && (
+            <>
+              <Separator />
+              <div className="p-2">{sidebarFooter}</div>
+            </>
+          )}
         </div>
       </motion.aside>
 

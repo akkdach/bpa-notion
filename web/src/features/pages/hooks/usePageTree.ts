@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as pageApi from '../service/pageApi'
-import type { CreatePageInput, PageNode } from '../types'
+import type { CreatePageInput, PageNode, UpdatePageInput } from '../types'
 
 export const pageKeys = {
   tree: ['pages', 'tree'] as const,
+  trash: ['pages', 'trash'] as const,
   detail: (pageId: string) => ['pages', 'detail', pageId] as const,
 }
 
@@ -36,7 +37,90 @@ export function useDeletePage() {
 
   return useMutation({
     mutationFn: (pageId: string) => pageApi.deletePage(pageId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: pageKeys.tree }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: pageKeys.tree })
+      void queryClient.invalidateQueries({ queryKey: pageKeys.trash })
+    },
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  แก้หน้า — optimistic เพราะ status chip ถูกกดรัว ๆ ได้
+//
+//  รอ round-trip ก่อนค่อยเปลี่ยนสีทำให้รู้สึกว่ากดไม่ติด แล้วผู้ใช้จะกดซ้ำ
+//  ซึ่งวนสถานะเกินที่ต้องการ
+// ═══════════════════════════════════════════════════════════════════════════
+export function useUpdatePage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ pageId, input }: { pageId: string; input: UpdatePageInput }) =>
+      pageApi.updatePage(pageId, input),
+
+    onMutate: async ({ pageId, input }) => {
+      await queryClient.cancelQueries({ queryKey: pageKeys.tree })
+      const previous = queryClient.getQueryData<PageNode[]>(pageKeys.tree)
+
+      queryClient.setQueryData<PageNode[]>(pageKeys.tree, (nodes) =>
+        nodes?.map((node) =>
+          node.id === pageId
+            ? {
+                ...node,
+                ...(input.title !== undefined ? { title: input.title } : {}),
+                ...(input.icon !== undefined ? { icon: input.icon } : {}),
+                // '' = ล้างสถานะ ต้องกลายเป็น undefined ไม่ใช่สตริงว่าง
+                ...(input.status !== undefined
+                  ? { status: input.status === '' ? undefined : input.status }
+                  : {}),
+              }
+            : node,
+        ),
+      )
+
+      return { previous }
+    },
+
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(pageKeys.tree, context.previous)
+    },
+
+    // settled ไม่ใช่ success — ต้อง refetch ทั้งตอนสำเร็จและตอนล้มเหลว
+    // เพื่อให้สิ่งที่เห็นตรงกับเซิร์ฟเวอร์เสมอ
+    onSettled: (_data, _error, { pageId }) => {
+      void queryClient.invalidateQueries({ queryKey: pageKeys.tree })
+      void queryClient.invalidateQueries({ queryKey: pageKeys.detail(pageId) })
+    },
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ถังขยะ
+// ═══════════════════════════════════════════════════════════════════════════
+export function useTrash() {
+  return useQuery({
+    queryKey: pageKeys.trash,
+    queryFn: ({ signal }) => pageApi.fetchTrash(signal),
+  })
+}
+
+export function useRestorePage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (pageId: string) => pageApi.restorePage(pageId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: pageKeys.tree })
+      void queryClient.invalidateQueries({ queryKey: pageKeys.trash })
+    },
+  })
+}
+
+export function usePurgePage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (pageId: string) => pageApi.purgePage(pageId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: pageKeys.trash }),
   })
 }
 
