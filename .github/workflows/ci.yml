@@ -170,3 +170,162 @@ jobs:
       - name: ปิด stack
         if: always()
         run: docker compose down -v
+
+  # ═════════════════════════════════════════════════════════════════════════
+  #  Verify — สคริปต์ที่ยิงของจริง
+  #
+  #  ⚠️ ก่อนมี job นี้ ไม่มีอะไรใน CI รัน scripts/*.mjs หรือ playwright เลย
+  #     smoke-test.mjs มี check() 116 ข้อที่ไม่มีใครบังคับ = เขียนไว้แล้วพังได้
+  #     เงียบ ๆ การ "verify" ทุกอย่างจึงเป็นละครจนกว่าจะมี job นี้
+  #
+  #  ใช้ topology แบบ dev (postgres จาก compose + `dotnet run` บน 5081)
+  #  ไม่ใช่ stack ใน compose ทั้งก้อน เพราะ:
+  #    · verify-repair.mjs ทำข้อมูลให้เพี้ยนผ่าน scripts/run-sql.cs ซึ่งอ่าน
+  #      connection string จาก configuration ชุดเดียวกับ api — ต้องชี้ฐานเดียวกัน
+  #      จริง ๆ ไม่งั้นมันจะทำฐานหนึ่งเพี้ยนแล้วไปตรวจอีกฐาน ได้ผลว่า "ซ่อมสำเร็จ"
+  #      ทั้งที่ไม่เคยมีอะไรเพี้ยน (คอมเมนต์ในสคริปต์นั้นเตือนเรื่องนี้ไว้แล้ว)
+  #    · playwright ตั้ง baseURL ไว้ที่ vite dev server ซึ่ง proxy ไป 5081
+  #
+  #  env var ชั้นบนสุดของ .NET configuration จึงเป็นตัวที่ทำให้ api และ
+  #  run-sql.cs ชี้ฐานเดียวกันแน่นอนโดยไม่ต้องพึ่ง User Secrets ที่ CI ไม่มี
+  # ═════════════════════════════════════════════════════════════════════════
+  verify:
+    name: Verify (ยิง API / MCP / เบราว์เซอร์จริง)
+    runs-on: ubuntu-latest
+    needs: [api, web]
+
+    env:
+      PGPASSWORD_CI: ci_verify_password
+      POSTGRES_HOST_PORT: '5440'
+      ConnectionStrings__DefaultConnection: >-
+        Host=localhost;Port=5440;Database=projectmanagement;Username=postgres;Password=ci_verify_password;Include Error Detail=true
+      Jwt__Key: ci_jwt_key_ที่ยาวเกินสามสิบสองไบต์แน่นอนสำหรับการทดสอบเท่านั้น
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5081
+      API_BASE: http://localhost:5081/api/v1
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ─────────────────────────────────────────────────────────────────────
+      #  postgres เท่านั้น — ไม่ต้องการ api/web ใน container
+      #
+      #  volume ใหม่ทุกครั้งใน CI → db/init/001_extensions.sql ถูกรันให้เอง
+      #  (นอก CI มันรันแค่ตอน volume ว่าง ซึ่งเป็นกับดักที่ README เตือนไว้)
+      # ─────────────────────────────────────────────────────────────────────
+      - name: เตรียม .env แล้วเปิดเฉพาะ postgres
+        run: |
+          cp .env.example .env
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${PGPASSWORD_CI}|" .env
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')|" .env
+          docker compose up -d postgres --wait --wait-timeout 120
+
+      - name: ลง schema
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.* || dotnet tool update --global dotnet-ef --version 10.*
+          dotnet ef database update --project api
+
+      # ck_pages_status กันค่าขยะจากทางที่ไม่ผ่าน service (raw SQL, psql,
+      # ExecuteUpdateAsync) — ตรงนี้ตรวจแค่ว่า "มีอยู่และนิยามถูก"
+      # ส่วนการพิสูจน์ว่ามันกันจริงต้องมีแถวให้กัน จึงอยู่หลัง smoke-test
+      - name: ck_pages_status ต้องมีอยู่และนิยามครบสามค่า
+        run: |
+          docker compose exec -T postgres \
+            psql -U postgres -d projectmanagement -t -A \
+            -c "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_pages_status'" \
+            | tee ck.txt
+          test -s ck.txt
+          grep -q "'todo'"  ck.txt
+          grep -q "'doing'" ck.txt
+          grep -q "'done'"  ck.txt
+
+      - name: build MCP server (verify-mcp เรียก .dll ตัวนี้)
+        run: dotnet build mcp -c Release
+
+      - name: ติดตั้ง dependency ฝั่ง web (verify-ydoc ใช้ yjs ตัวจริงจากที่นี่)
+        working-directory: web
+        run: npm ci
+
+      - name: เปิด API ค้างไว้
+        run: |
+          dotnet run --project api --configuration Release --no-launch-profile > api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS "${API_BASE}/health" > /dev/null 2>&1; then
+              echo "API พร้อมหลังจาก ${i} วินาที"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::API ไม่ตอบ health ภายใน 60 วินาที"
+          cat api.log
+          exit 1
+
+      # ─── สคริปต์แต่ละตัวเป็น step แยก เพื่อให้เห็นว่าตัวไหนแดง ─────────────
+      - name: smoke-test (REST ตั้งแต่ register ถึงแก้เนื้อหา)
+        run: node scripts/smoke-test.mjs "$API_BASE"
+
+      # ต้องอยู่ "หลัง" smoke-test เพราะ UPDATE ที่ไม่โดนแถวไหนเลยจะสำเร็จ
+      # โดยไม่แตะ constraint — บนฐานเปล่าเทสนี้จะผ่านทั้งที่ constraint หายไปก็ได้
+      - name: ck_pages_status ต้องปฏิเสธค่าที่ไม่รู้จักจริง
+        run: |
+          rows=$(docker compose exec -T postgres \
+            psql -U postgres -d projectmanagement -t -A \
+            -c "SELECT count(*) FROM pages")
+          echo "มี pages ${rows} แถวให้ทดสอบ"
+          test "$rows" -gt 0
+
+          # ต้อง "ล้มเหลว" — สำเร็จแปลว่า constraint ไม่ได้บังคับอะไร
+          if docker compose exec -T postgres \
+               psql -U postgres -d projectmanagement -v ON_ERROR_STOP=1 \
+               -c "UPDATE pages SET status = 'ยังไม่เริ่ม'"; then
+            echo "::error::ck_pages_status ไม่ได้กันค่าที่ไม่รู้จัก"
+            exit 1
+          fi
+
+      - name: verify-ydoc (Y.Doc → bytea → bootstrap ครบรอบ)
+        run: node scripts/verify-ydoc.mjs "$API_BASE"
+
+      - name: verify-repair (ทำ ancestor_ids/access_root_id เพี้ยนแล้วซ่อม)
+        run: node scripts/verify-repair.mjs "$API_BASE"
+
+      - name: verify-mcp (JSON-RPC กับ MCP server จริง)
+        run: node scripts/verify-mcp.mjs "$API_BASE"
+
+      - name: playwright (เบราว์เซอร์จริง — vite dev server proxy ไป 5081)
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: เก็บ log เมื่อล้มเหลว
+        if: failure()
+        run: |
+          echo '─── api.log ───'
+          tail -200 api.log || true
+          echo '─── postgres ───'
+          docker compose logs --no-color --tail 100 postgres || true
+
+      # reporter เป็น list เท่านั้น (ไม่มี html report) แต่ trace ถูกเก็บไว้
+      # ที่ test-results/ ตาม use.trace = 'retain-on-failure'
+      - name: playwright trace เมื่อล้มเหลว
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: ปิด stack
+        if: always()
+        run: docker compose down -v

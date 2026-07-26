@@ -13,8 +13,6 @@ namespace ProjectManagementMcp;
 [McpServerToolType]
 public static class TaskTools
 {
-    private static readonly string[] Allowed = ["todo", "doing", "done"];
-
     private static string Emoji(string? status) => status switch
     {
         "todo" => "⬜",
@@ -23,14 +21,20 @@ public static class TaskTools
         _ => "▫️"
     };
 
-    private static string Norm(string status)
-    {
-        var s = status.Trim().ToLowerInvariant();
-        if (!Allowed.Contains(s))
-            throw new InvalidOperationException(
-                $"สถานะต้องเป็น: {string.Join(" / ", Allowed)} (ได้รับ '{status}')");
-        return s;
-    }
+    /// <summary>
+    /// normalise เท่านั้น — ไม่ตรวจว่าค่าถูกต้อง
+    /// </summary>
+    /// <remarks>
+    /// เดิมมีรายการสถานะที่อนุญาตสำเนาไว้ที่นี่ด้วย ตัดออกแล้วโดยเจตนา:
+    /// ฐานข้อมูลมี ck_pages_status, API มี PageStatus.All ที่ validate และตอบ 400
+    /// พร้อมรายการค่าที่ถูกต้องกลับมา สำเนาที่สามจึงไม่ได้กันอะไรเพิ่ม
+    /// แต่รับประกันว่าจะหลุด sync ตอนเพิ่มสถานะใหม่ แล้ว AI จะเจอ "ทำไม่ได้"
+    /// จาก MCP ทั้งที่ API ยอมรับค่านั้นแล้ว
+    ///
+    /// ข้อความ error จาก API เด้งกลับผ่าน Run() อยู่แล้ว — ดู verify-mcp.mjs
+    /// เคส "สถานะที่ไม่มีในระบบ → ข้อความบอกค่าที่ถูกต้อง"
+    /// </remarks>
+    private static string Norm(string status) => status.Trim().ToLowerInvariant();
 
     /// <summary>
     /// ห่อการทำงานของ tool ให้ error กลายเป็นข้อความที่ Claude อ่านแล้วแก้ตัวเองได้
@@ -168,7 +172,7 @@ public static class TaskTools
         [Description("emoji ไอคอน (ไม่บังคับ)")] string? icon = null,
         CancellationToken ct = default) => Run(async () =>
     {
-        var page = await client.CreatePageAsync(null, title, icon, ct);
+        var page = await client.CreatePageAsync(null, title, icon, null, ct);
         return $"สร้างโปรเจกต์แล้ว: {icon ?? "📁"} {Title(page.Title)}  id={page.Id}";
     });
 
@@ -182,13 +186,10 @@ public static class TaskTools
         [Description("emoji ไอคอน (ไม่บังคับ)")] string? icon = null,
         CancellationToken ct = default) => Run(async () =>
     {
-        // ตรวจสถานะก่อนสร้าง — ไม่งั้นสถานะผิดจะทิ้งหน้าเปล่าไว้ในระบบ
-        var s = Norm(status);
-
-        var page = await client.CreatePageAsync(projectId, title, icon, ct);
-        // create ไม่รับ status ตรง ๆ — เซ็ตด้วย PATCH ตามหลัง
-        var withStatus = await client.UpdatePageAsync(page.Id, null, null, s, ct);
-        return $"สร้างงานแล้ว: {Emoji(withStatus.Status)} {Title(page.Title)}  [{s}]  id={page.Id}";
+        // คำขอเดียว — เดิมเป็น POST แล้ว PATCH ตาม ซึ่งล้มกลางทางแล้วเหลือหน้าที่
+        // ไม่มีสถานะค้างไว้ ตอนนี้ API รับ status ตอนสร้างแล้ว (CreatePageRequest.Status)
+        var page = await client.CreatePageAsync(projectId, title, icon, Norm(status), ct);
+        return $"สร้างงานแล้ว: {Emoji(page.Status)} {Title(page.Title)}  [{page.Status}]  id={page.Id}";
     });
 
     [McpServerTool(Name = "update_task")]

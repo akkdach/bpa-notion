@@ -234,10 +234,11 @@ public sealed class PmClient(IConfiguration configuration)
     public Task<PageDto> GetPageAsync(Guid pageId, CancellationToken ct)
         => SendAsync<PageDto>(HttpMethod.Get, $"/api/v1/pages/{pageId}", null, ct);
 
+    /// <summary>สร้างหน้าพร้อมสถานะในคำขอเดียว — status = null คือหน้าปกติที่ไม่ใช่งาน</summary>
     public Task<PageDto> CreatePageAsync(
-        Guid? parentId, string title, string? icon, CancellationToken ct)
+        Guid? parentId, string title, string? icon, string? status, CancellationToken ct)
         => SendAsync<PageDto>(HttpMethod.Post, "/api/v1/pages",
-            new { parentId, title, icon, afterPageId = (Guid?)null }, ct);
+            new { parentId, title, icon, afterPageId = (Guid?)null, status }, ct);
 
     /// <summary>ส่งเฉพาะ field ที่ไม่ null — field ที่ null เซิร์ฟเวอร์จะไม่แตะ</summary>
     public Task<PageDto> UpdatePageAsync(

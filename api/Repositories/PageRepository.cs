@@ -51,6 +51,7 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
                 p.Kind,
                 p.AccessRootId,
                 db.Pages.Any(c => c.ParentId == p.Id),
+                p.LastEditedBy,
                 p.UpdatedAt,
                 p.DeletedAt));
 
@@ -70,7 +71,7 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
              .OrderByDescending(p => p.DeletedAt)
              .Select(p => new PageNode(
                  p.Id, p.ParentId, p.Title, p.Icon, p.Status, p.Rank, p.Depth, p.Kind,
-                 p.AccessRootId, false, p.UpdatedAt, p.DeletedAt))
+                 p.AccessRootId, false, p.LastEditedBy, p.UpdatedAt, p.DeletedAt))
              .ToListAsync(ct);
 
     public async Task<(string? Before, string? After)> GetNeighbourRanksAsync(
@@ -112,13 +113,18 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
                  .SetProperty(p => p.LastEditedBy, editorId)
                  .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
 
+    // เดิม method นี้ไม่เซ็ต LastEditedBy ต่างจาก UpdateTitle/UpdateStatus ที่เซ็ต
+    // ผลคือแก้ไอคอนแล้ว updated_at ขยับแต่ last_edited_by ยังเป็นคนก่อนหน้า
+    // = ประวัติที่โกหกแบบเงียบ ๆ ซึ่งแย่กว่าไม่มีประวัติเลย
     public Task UpdateIconAsync(
-        Guid pageId, string? icon, string? coverUrl, CancellationToken ct = default)
+        Guid pageId, string? icon, string? coverUrl, Guid editorId,
+        CancellationToken ct = default)
         => db.Pages
              .Where(p => p.Id == pageId)
              .ExecuteUpdateAsync(s => s
                  .SetProperty(p => p.Icon, icon)
                  .SetProperty(p => p.CoverUrl, coverUrl)
+                 .SetProperty(p => p.LastEditedBy, editorId)
                  .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
 
     public Task UpdateStatusAsync(
@@ -140,9 +146,28 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
     //  หน้าที่ย้าย, …ต่อไป] เราแทนที่ "ส่วนหน้า" ที่ยาวเท่ากับ depth เดิม
     //  ด้วยชุดใหม่ แล้วเก็บส่วนที่เหลือ (ซึ่งเริ่มด้วยตัวหน้าที่ย้ายเอง) ไว้
     // ═══════════════════════════════════════════════════════════════════════
-    public Task<int> MoveSubtreeAsync(MoveSubtreeCommand command, CancellationToken ct = default)
+    public Task<int> MoveSubtreeAsync(
+        MoveSubtreeCommand command, PageAcl? aclToAdd = null, CancellationToken ct = default)
         => db.InTransactionAsync(async token =>
         {
+            // ─────────────────────────────────────────────────────────────
+            //  0) ACL ที่ต้องเกิดพร้อมการย้าย (ย้ายขึ้นระดับบนสุดโดยไม่มี ACL เดิม)
+            //
+            //  ⚠️ ต้องอยู่ใน transaction เดียวกับการย้าย เดิม service เรียก
+            //     AddAclAsync ก่อนแล้วค่อยเรียก method นี้ ซึ่ง AddAclAsync มี
+            //     SaveChangesAsync ของตัวเอง = commit ทันที
+            //     ถ้าการย้ายล้มหลังจากนั้น จะเหลือ ACL แบบ workspace-wide Editor
+            //     ค้างอยู่บนหน้าที่ "ไม่ได้ย้าย" — หน้านั้นกลายเป็น access root
+            //     ที่ให้สิทธิ์แก้กับทุกคนใน workspace โดยไม่มีใครสั่ง
+            //     นี่คือการมอบสิทธิ์แบบเงียบ ๆ ไม่ใช่แค่แถวขยะ และ AI ที่ retry
+            //     การย้ายที่ล้มจะสร้างมันซ้ำได้เรื่อย ๆ
+            // ─────────────────────────────────────────────────────────────
+            if (aclToAdd is not null)
+            {
+                db.PageAcls.Add(aclToAdd);
+                await db.SaveChangesAsync(token);
+            }
+
             // 1) ตัวหน้าที่ถูกย้ายเอง
             await sql.ExecuteAsync("""
                 UPDATE pages

@@ -167,6 +167,20 @@ node scripts/check-architecture.mjs    # ฝั่ง api  (7 gates)
 cd web && npm run lint                 # ฝั่ง web  (layer boundaries + axios)
 ```
 
+สคริปต์ใน `scripts/` ที่ยิงของจริงรันใน CI job ชื่อ `verify` (ต้องมี API ขึ้นก่อน):
+
+```bash
+dotnet run --project api                        # ต้องเปิดค้างไว้
+node scripts/smoke-test.mjs                     # REST ตั้งแต่ register ถึงแก้เนื้อหา
+node scripts/verify-ydoc.mjs                    # Y.Doc → bytea → bootstrap
+node scripts/verify-repair.mjs                  # ทำ denormalise เพี้ยนแล้วซ่อม
+node scripts/verify-mcp.mjs                     # JSON-RPC กับ MCP server จริง
+cd web && npx playwright test                   # เบราว์เซอร์จริง
+```
+
+> ก่อนหน้านี้ **ไม่มี job ไหนใน CI รันสคริปต์พวกนี้หรือ playwright เลย**
+> `smoke-test.mjs` มี `check()` 116 ข้อที่ไม่มีใครบังคับ — เขียนไว้แล้วพังได้เงียบ ๆ
+
 ### ฝั่ง API
 
 | Gate | เหตุผล |

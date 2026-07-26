@@ -66,6 +66,15 @@ public class PageTreeService(
         var workspaceId = tenant.RequireWorkspaceId();
         var userId = tenant.RequireUserId();
 
+        // ตรวจสถานะก่อนแตะฐาน — ไม่งั้นค่าผิดจะทิ้งหน้าเปล่าไว้ในระบบ
+        string? status = null;
+        if (request.Status is not null)
+        {
+            var parsed = ParseStatus(request.Status);
+            if (parsed.IsFailure) return parsed.Error;
+            status = parsed.Value;
+        }
+
         Page? parent = null;
 
         if (request.ParentId is { } parentId)
@@ -98,6 +107,7 @@ public class PageTreeService(
             Kind = PageKind.Page,
             Title = request.Title?.Trim() ?? string.Empty,
             Icon = request.Icon,
+            Status = status,
             CreatedBy = userId,
             LastEditedBy = userId,
 
@@ -145,7 +155,8 @@ public class PageTreeService(
 
         if (request.Icon is not null || request.CoverUrl is not null)
         {
-            await pages.UpdateIconAsync(pageId, request.Icon, request.CoverUrl, ct);
+            await pages.UpdateIconAsync(
+                pageId, request.Icon, request.CoverUrl, tenant.RequireUserId(), ct);
             page.Icon = request.Icon;
             page.CoverUrl = request.CoverUrl;
         }
@@ -153,27 +164,34 @@ public class PageTreeService(
         // สถานะงาน — "" (สตริงว่าง) = ล้างสถานะ, null = ไม่แตะ
         if (request.Status is not null)
         {
-            var status = request.Status.Trim().ToLowerInvariant();
+            var parsed = ParseStatus(request.Status);
+            if (parsed.IsFailure) return parsed.Error;
 
-            if (status.Length == 0)
-            {
-                await pages.UpdateStatusAsync(pageId, null, tenant.RequireUserId(), ct);
-                page.Status = null;
-            }
-            else if (AllowedStatuses.Contains(status))
-            {
-                await pages.UpdateStatusAsync(pageId, status, tenant.RequireUserId(), ct);
-                page.Status = status;
-            }
-            else
-            {
-                return Error.Validation(
-                    $"สถานะต้องเป็นหนึ่งใน: {string.Join(", ", AllowedStatuses)} (หรือค่าว่างเพื่อล้าง)",
-                    "invalid_status");
-            }
+            await pages.UpdateStatusAsync(pageId, parsed.Value, tenant.RequireUserId(), ct);
+            page.Status = parsed.Value;
         }
 
         return page.ToDto(role.Value);
+    }
+
+    /// <summary>
+    /// ตรวจและ normalise สถานะที่ผู้เรียกส่งมา — คืน null เมื่อเป็นสตริงว่าง (ล้างสถานะ)
+    /// </summary>
+    /// <remarks>
+    /// แยกออกมาเพราะทั้ง CreateAsync และ UpdateAsync ต้องใช้กฎเดียวกัน
+    /// ฐานข้อมูลมี ck_pages_status กันไว้อีกชั้น แต่ที่นี่คือชั้นที่ตอบผู้เรียกได้ว่า
+    /// ค่าที่ถูกต้องมีอะไร — constraint ฝั่งฐานจะได้เป็น 500 ไม่ใช่ 400
+    /// </remarks>
+    private static Result<string?> ParseStatus(string status)
+    {
+        var normalised = status.Trim().ToLowerInvariant();
+
+        if (normalised.Length == 0) return Result<string?>.Success(null);
+        if (PageStatus.IsValid(normalised)) return Result<string?>.Success(normalised);
+
+        return Error.Validation(
+            $"สถานะต้องเป็นหนึ่งใน: {PageStatus.Listed} (หรือค่าว่างเพื่อล้าง)",
+            "invalid_status");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -248,13 +266,15 @@ public class PageTreeService(
 
         // ย้ายขึ้นระดับบนสุดโดยไม่มี ACL ของตัวเอง = จะกลายเป็น access root
         // ที่ไม่มี grant ต้องสร้าง ACL ให้เหมือนตอนสร้างหน้าใหม่
-        if (newParent is null && !hasOwnAcl)
-        {
-            await pages.AddAclAsync(
-                PageAcl.ForWorkspace(
-                    tenant.RequireWorkspaceId(), pageId, PageRole.Editor, tenant.RequireUserId()),
-                ct);
-        }
+        //
+        // ⚠️ ประกอบไว้เฉย ๆ แล้วส่งให้ MoveSubtreeAsync เขียนในธุรกรรมเดียวกับการย้าย
+        //    ห้ามเรียก AddAclAsync ที่นี่ — มัน commit ทันที ถ้าการย้ายล้มทีหลัง
+        //    หน้านั้นจะเหลือ ACL แบบ workspace-wide Editor ค้างอยู่ทั้งที่ไม่ได้ย้าย
+        //    = ทุกคนใน workspace แก้หน้านั้นได้โดยไม่มีใครสั่ง
+        var aclToAdd = newParent is null && !hasOwnAcl
+            ? PageAcl.ForWorkspace(
+                tenant.RequireWorkspaceId(), pageId, PageRole.Editor, tenant.RequireUserId())
+            : null;
 
         var affected = await pages.MoveSubtreeAsync(new MoveSubtreeCommand(
             PageId: pageId,
@@ -263,7 +283,7 @@ public class PageTreeService(
             OldDepth: page.Depth,
             NewRank: FractionalIndex.Between(before, after),
             OldAccessRootId: page.AccessRootId,
-            NewAccessRootId: newAccessRoot), ct);
+            NewAccessRootId: newAccessRoot), aclToAdd, ct);
 
         logger.LogInformation(
             "ย้ายหน้า {PageId} จาก depth {OldDepth} ไป {NewDepth} — ลูกหลาน {Affected} หน้า",
@@ -388,10 +408,6 @@ public class PageTreeService(
 
         return new RepairResultDto(fixedAncestors, fixedRoots);
     }
-
-    // สถานะงานที่อนุญาต — เก็บชิดกับ logic ที่ validate เพื่อไม่ให้หลุด sync
-    private static readonly HashSet<string> AllowedStatuses =
-        new(StringComparer.Ordinal) { "todo", "doing", "done" };
 
     private static Error PageNotFound => Error.NotFound("ไม่พบหน้านี้", "page_not_found");
 

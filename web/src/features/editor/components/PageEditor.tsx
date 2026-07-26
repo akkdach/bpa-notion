@@ -9,7 +9,7 @@ import { BlockNoteView } from '@blocknote/shadcn'
 //
 //    ทั้งคู่เป็น optional peer dependency ถ้า import ผิดตัว TypeScript จะบ่นว่า
 //    Y.Doc คนละชนิดกัน โดยไม่บอกว่าสาเหตุคือเลือก entry point ผิด
-import { CollaborationExtension } from '@blocknote/core/yjs'
+import { withCollaboration } from '@blocknote/core/yjs'
 import type * as Y from 'yjs'
 import { Cloud, CloudOff, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -42,24 +42,37 @@ export function PageEditor({ doc, status, editable, onChangeProjection }: PageEd
   const fragment = useMemo(() => doc.getXmlFragment('blocknote'), [doc])
 
   const editor = useCreateBlockNote(
-    {
-      // ─────────────────────────────────────────────────────────────────
-      //  ผูก editor เข้ากับ Y.Doc ตั้งแต่ Phase 1
-      //
-      //  ยังไม่ส่ง provider เพราะยังไม่มี realtime — provider มีไว้ให้ awareness
-      //  (เคอร์เซอร์ของคนอื่น) ซึ่งเป็นงาน Phase 2 ตอนนั้นแค่เพิ่ม provider
-      //  เข้ามาตรงนี้ ไม่ต้องแก้อย่างอื่น
-      //
-      //  การผูก Y.Doc ตั้งแต่ตอนนี้สำคัญ: ถ้า Phase 1 เก็บเป็น JSON แล้วค่อย
-      //  ย้ายมาเป็น CRDT ทีหลัง เท่ากับต้องเขียน editor ใหม่ทั้งหมด
-      // ─────────────────────────────────────────────────────────────────
-      extensions: [
-        CollaborationExtension({
-          fragment,
-          user: { name: '', color: '' },
-        }),
-      ],
-    },
+    // ─────────────────────────────────────────────────────────────────
+    //  ผูก editor เข้ากับ Y.Doc ตั้งแต่ Phase 1
+    //
+    //  ยังไม่ส่ง provider เพราะยังไม่มี realtime — provider มีไว้ให้ awareness
+    //  (เคอร์เซอร์ของคนอื่น) ซึ่งเป็นงาน Phase 2 ตอนนั้นแค่เพิ่ม provider
+    //  เข้ามาใน collaboration ไม่ต้องแก้อย่างอื่น
+    //
+    //  การผูก Y.Doc ตั้งแต่ตอนนี้สำคัญ: ถ้า Phase 1 เก็บเป็น JSON แล้วค่อย
+    //  ย้ายมาเป็น CRDT ทีหลัง เท่ากับต้องเขียน editor ใหม่ทั้งหมด
+    //
+    //  ⚠️ ต้องผ่าน withCollaboration() ไม่ใช่ใส่ CollaborationExtension เข้า
+    //     extensions เองตรง ๆ — helper ตัวนี้ทำอีกสองอย่างที่มองไม่เห็นแต่จำเป็น:
+    //
+    //     1. disableExtensions: ["history"] — ปิด history plugin ของ ProseMirror
+    //        ซึ่งเข้ากับ yjs ไม่ได้ ถ้าไม่ปิด จะมี undo stack "สองอัน" บน Y.Doc
+    //        เดียวกัน (history() ของ ProseMirror + yUndoPlugin() ที่มากับ
+    //        CollaborationExtension) แล้ว Ctrl+Z จะย้อนข้ามการแก้ของคนอื่น
+    //
+    //     2. initialContent ที่ id คงที่ ("initialBlockId") — ไม่มีอันนี้
+    //        ทุก client จะสร้างย่อหน้าว่างของตัวเองด้วย id สุ่ม แล้วตอน CRDT
+    //        merge จะได้ย่อหน้าว่าง N อันเรียงกัน ไม่ใช่อันเดียว
+    //
+    //     ทั้งสองอย่างพังแบบเงียบ ๆ ในเครื่องเดียว — เห็นตอนมีสอง client
+    //     หรือตอนมีอย่างอื่น (เช่นเซิร์ฟเวอร์) เขียนลง doc เดียวกัน
+    // ─────────────────────────────────────────────────────────────────
+    withCollaboration({
+      collaboration: {
+        fragment,
+        user: { name: '', color: '' },
+      },
+    }),
     [fragment],
   )
 

@@ -6,11 +6,19 @@ namespace ProjectManagementAPI.DTOs;
 
 /// <param name="ParentId">null = หน้าระดับบนสุด</param>
 /// <param name="AfterPageId">แทรกต่อจากหน้านี้ — null = ต่อท้ายสุด</param>
+/// <param name="Status">
+/// สถานะงานเริ่มต้น: todo / doing / done — null = ไม่ใช่งาน
+///
+/// รับตอนสร้างเพื่อให้ "สร้างงานพร้อมสถานะ" เป็น request เดียว ก่อนหน้านี้ผู้เรียก
+/// (mcp/) ต้อง POST แล้ว PATCH ตาม ซึ่งไม่ atomic — ล้มกลางทางแล้วเหลือหน้าที่
+/// ไม่มีสถานะค้างอยู่ในระบบ
+/// </param>
 public record CreatePageRequest(
     Guid? ParentId,
     string? Title,
     string? Icon,
-    Guid? AfterPageId);
+    Guid? AfterPageId,
+    string? Status = null);
 
 /// <param name="Status">สถานะงาน: todo / doing / done — "" (สตริงว่าง) = ล้างสถานะ (ไม่ใช่งาน)</param>
 public record UpdatePageRequest(string? Title, string? Icon, string? CoverUrl, string? Status = null);
@@ -19,6 +27,13 @@ public record UpdatePageRequest(string? Title, string? Icon, string? CoverUrl, s
 /// <param name="AfterPageId">วางต่อจากหน้านี้ในกลุ่มพี่น้องใหม่ — null = ท้ายสุด</param>
 public record MovePageRequest(Guid? ParentId, Guid? AfterPageId);
 
+/// <param name="LastEditedBy">
+/// ใครแก้หน้านี้ครั้งล่าสุด — null เฉพาะข้อมูลเก่าก่อนที่จะเริ่มบันทึกค่านี้
+///
+/// ส่งเป็น id ไม่ใช่ชื่อ เพราะการ resolve ชื่อต้อง join users ซึ่ง PageNodeDto
+/// ใช้ในการโหลด tree ทั้ง workspace ทีเดียว — จ่ายค่า join ต่อทุกโหนดไม่คุ้ม
+/// ฝั่งที่ต้องโชว์ชื่อคน (ฟีดกิจกรรม) เป็นลิสต์ที่มีขอบเขต จึง resolve ที่นั่น
+/// </param>
 public record PageDto(
     Guid Id,
     Guid? ParentId,
@@ -32,6 +47,7 @@ public record PageDto(
     string? Status,
     Guid AccessRootId,
     string MyRole,
+    Guid? LastEditedBy,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? DeletedAt);
@@ -46,6 +62,7 @@ public record PageNodeDto(
     string Rank,
     int Depth,
     bool HasChildren,
+    Guid? LastEditedBy,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? DeletedAt);
 

@@ -26,6 +26,7 @@ public static class PageMapping
         page.Status,
         page.AccessRootId,
         myRole.ToDbValue(),
+        page.LastEditedBy,
         page.CreatedAt,
         page.UpdatedAt,
         page.DeletedAt);
@@ -39,6 +40,7 @@ public static class PageMapping
         node.Rank,
         node.Depth,
         node.HasChildren,
+        node.LastEditedBy,
         node.UpdatedAt,
         node.DeletedAt);
 }

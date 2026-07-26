@@ -26,7 +26,9 @@ public interface IPageRepository
 
     Task UpdateTitleAsync(Guid pageId, string title, Guid editorId, CancellationToken ct = default);
 
-    Task UpdateIconAsync(Guid pageId, string? icon, string? coverUrl, CancellationToken ct = default);
+    Task UpdateIconAsync(
+        Guid pageId, string? icon, string? coverUrl, Guid editorId,
+        CancellationToken ct = default);
 
     /// <summary>เซ็ตสถานะงาน (null = ล้างสถานะ ให้กลับเป็นหน้าปกติ)</summary>
     Task UpdateStatusAsync(Guid pageId, string? status, Guid editorId, CancellationToken ct = default);
@@ -35,7 +37,16 @@ public interface IPageRepository
     /// ย้ายหน้า (พร้อมลูกหลานทั้งหมด) ไปใต้ parent ใหม่
     /// ต้องเป็น UPDATE เดียวสำหรับ subtree ไม่ใช่ loop
     /// </summary>
-    Task<int> MoveSubtreeAsync(MoveSubtreeCommand command, CancellationToken ct = default);
+    /// <param name="aclToAdd">
+    /// ACL ที่ต้องเกิดพร้อมกับการย้ายในธุรกรรมเดียว — ใช้ตอนย้ายขึ้นระดับบนสุด
+    /// โดยที่หน้านั้นยังไม่มี ACL ของตัวเอง null = ไม่ต้องเพิ่ม
+    ///
+    /// รับเข้ามาที่นี่แทนที่จะให้ service เรียก AddAclAsync แยก เพราะการ commit
+    /// ACL ก่อนแล้วย้ายล้มทีหลัง = มอบสิทธิ์แก้ให้ทุกคนใน workspace บนหน้าที่
+    /// ไม่ได้ย้าย โดยไม่มีใครสั่ง
+    /// </param>
+    Task<int> MoveSubtreeAsync(
+        MoveSubtreeCommand command, PageAcl? aclToAdd = null, CancellationToken ct = default);
 
     /// <summary>soft delete หน้าและลูกหลานทั้งหมด</summary>
     Task<int> SoftDeleteSubtreeAsync(Guid pageId, CancellationToken ct = default);
@@ -94,6 +105,7 @@ public record PageNode(
     PageKind Kind,
     Guid AccessRootId,
     bool HasChildren,
+    Guid? LastEditedBy,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? DeletedAt);
 
