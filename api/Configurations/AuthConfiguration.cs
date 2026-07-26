@@ -16,10 +16,20 @@ public static class AuthConfiguration
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var key = configuration["Jwt:Key"]
-            ?? throw new InvalidOperationException("Jwt:Key ไม่ได้ตั้งค่า (JWT_SECRET ใน .env)");
+        var key = configuration["Jwt:Key"];
         var issuer = configuration["Jwt:Issuer"]
             ?? throw new InvalidOperationException("Jwt:Issuer ไม่ได้ตั้งค่า");
+
+        // ⚠️ appsettings.json ประกาศ Jwt:Key ไว้เป็นสตริงว่าง ค่าที่ได้จึงเป็น ""
+        //    ไม่ใช่ null — ถ้าเช็คแค่ `?? throw` จะตกไปโดนเงื่อนไข "สั้นเกินไป"
+        //    ข้างล่าง แล้วได้ error ที่ชี้ผิดทาง
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException(
+                "Jwt:Key ไม่ได้ตั้งค่า — " +
+                "dev: รัน `pwsh scripts/setup-secrets.ps1` (หรือ `bash scripts/setup-secrets.sh`) | " +
+                "Docker: ตรวจ JWT_SECRET ใน .env");
+        }
 
         // HMAC-SHA256 ต้องมี key >= 256 bit ถ้าสั้นกว่านี้ ASP.NET Core จะ throw
         // ตอน request แรก ไม่ใช่ตอน startup — ดักไว้ที่นี่ให้ fail เร็ว

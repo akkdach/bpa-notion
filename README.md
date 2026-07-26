@@ -37,23 +37,66 @@ docker compose up -d --build --wait
 | http://localhost | เว็บ (nginx เสิร์ฟ SPA + proxy `/api` และ `/hubs`) |
 | http://localhost/api/v1/health | health check ผ่าน nginx |
 | http://localhost:5080 | API ตรง ๆ (Swagger UI อยู่ที่ root ตอน `ASPNETCORE_ENVIRONMENT=Development`) |
-| `localhost:5433` | PostgreSQL |
+| `localhost:5440` | PostgreSQL |
 
-> **ทำไม 5433 ไม่ใช่ 5432** — เครื่อง dev มักมี PostgreSQL ของตัวเองอยู่บน 5432 แล้ว
+> **ทำไม 5440 ไม่ใช่ 5432** — เครื่อง dev มักมี PostgreSQL ของตัวเองอยู่บน 5432 แล้ว
 > ถ้าใช้ port ชนกัน อย่างดีคือ bind ไม่ติด อย่างแย่คือ `dotnet ef database update`
 > ไปลง migration ผิดฐานโดยไม่มีใครรู้ ตั้งค่าได้ที่ `POSTGRES_HOST_PORT` ใน `.env`
+> (ไม่ใช้ 5433 ด้วย เพราะเป็นเลขที่ compose project อื่นเลือกกันบ่อย)
 
 ### พัฒนาแบบไม่ผ่าน Docker
+
+ตั้งค่าความลับครั้งเดียวก่อน — อ่านจาก `.env` แล้วเขียนลง .NET Secret Manager:
+
+```powershell
+pwsh scripts/setup-secrets.ps1        # Windows
+bash scripts/setup-secrets.sh         # macOS / Linux / git-bash
+```
+
+จากนั้นรันได้เลย ไม่ต้อง export env var ใด ๆ:
 
 ```bash
 docker compose up -d postgres     # เอาแค่ฐานข้อมูล
 
-cd api && dotnet run              # → http://localhost:5080  (Swagger ที่ /)
+dotnet run --project api          # → http://localhost:5081  (Swagger ที่ /)
 cd web && npm install && npm run dev   # → http://localhost:5173
 ```
 
-`vite.config.ts` proxy `/api` และ `/hubs` ไป `localhost:5080` ให้แล้ว (รวม `ws: true`
+`vite.config.ts` proxy `/api` และ `/hubs` ไป `localhost:5081` ให้แล้ว (รวม `ws: true`
 สำหรับ SignalR) ตอน dev จึงเห็น origin เดียวเหมือน production → ไม่เจอ CORS ต่างกัน
+
+> **5081 ไม่ใช่ 5080** — 5080 คือ container `pm-api` ที่ compose รันอยู่ ถ้า `dotnet run`
+> ไปฟังทับ จะได้อาการที่ debug ยากมาก: โค้ดใหม่ที่แก้แล้วไม่มีผล เพราะเบราว์เซอร์คุยกับ
+> container รุ่นเก่าอยู่ ทั้ง `launchSettings.json` และ vite proxy จึงตั้งเป็น 5081 ตรงกัน
+
+---
+
+## Configuration — ค่าไหนมาจากไหน
+
+connection string ประกอบจากหลายชั้น ตามลำดับของ .NET configuration (ตัวหลังทับตัวหน้า):
+
+| ชั้น | ไฟล์ / ที่มา | มีอะไร | ขึ้น git |
+|---|---|---|---|
+| 1 | `api/appsettings.json` | ประกาศ key ทั้งหมดเป็นค่าว่าง | ✅ |
+| 2 | `api/appsettings.Development.json` | `Host=localhost;Port=5440;Database=…` **ไม่มี password** | ✅ |
+| 3 | User Secrets (Development เท่านั้น) | `Postgres:Password`, `Jwt:Key` | ❌ |
+| 4 | environment variable | `ConnectionStrings__DefaultConnection` เต็มเส้น (Docker) | ❌ (`.env`) |
+
+`AddPersistence` เติม `Postgres:Password` ให้ connection string ที่ยังไม่มี password
+— **แต่ถ้า connection string มี password มาแล้วจะไม่แตะ** เพื่อให้ env var ของ Docker
+ชนะเสมอ เครื่องเดียวกันจึงรันทั้ง `dotnet run` และ `docker compose up` ได้โดยไม่ปนกัน
+
+เหตุผลที่แยก password ออกจาก connection string: `appsettings.Development.json` ขึ้น git
+จึงใส่ password ไม่ได้ ส่วน host/port/database **ไม่ใช่ความลับ** — มันคือ topology ของ
+dev environment ที่ควรอ่านเจอในโค้ด ไม่ใช่ซ่อนอยู่ในเครื่องของใครคนหนึ่ง
+
+```powershell
+dotnet user-secrets list --project api      # ดูค่าที่ตั้งไว้
+pwsh scripts/setup-secrets.ps1              # ตั้งใหม่ (รันซ้ำได้ ทับค่าเดิม)
+```
+
+> เปลี่ยน `POSTGRES_PASSWORD` หรือ `JWT_SECRET` ใน `.env` แล้วต้องรัน `setup-secrets`
+> ซ้ำ — สอง store นี้ไม่ได้ sync กันเอง
 
 ---
 

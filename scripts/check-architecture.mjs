@@ -159,10 +159,41 @@ const GATES = [
   },
   {
     name: 'ไม่มี connection string ที่ hardcode ในซอร์ส',
-    why: 'secret ต้องมาจาก environment variable เท่านั้น',
+    why: 'secret ต้องมาจาก environment variable หรือ User Secrets เท่านั้น',
     scope: (p) => p.startsWith('api/'),
     raw: true,
-    pattern: /(Password|Pwd)\s*=\s*[^;"\s{)]{3,}/i,
+    // ─────────────────────────────────────────────────────────────────────
+    //  ต้องเจอ Host=/Server= "ในบรรทัดเดียวกัน" ถึงจะนับว่าเป็น connection string
+    //
+    //  ⚠️ รุ่นแรกจับแค่ /Password\s*=\s*\S+/ ซึ่งฟ้อง `builder.Password = password;`
+    //     ใน PersistenceConfiguration ด้วย — นั่นคือการ assign ตัวแปร ไม่ใช่ความลับ
+    //     gate ที่ฟ้องโค้ดที่ถูกต้องคือ gate ที่จะโดนปิดทิ้งในอีกสองเดือน
+    //
+    //  ยังจับของจริงได้อยู่ เพราะ connection string ที่ hardcode ต้องมี host เสมอ
+    //  ("Host=db;...;Password=hunter2") ส่วนการต่อ password จากตัวแปรเข้ากับ
+    //  connection string ที่ไม่มี host ในบรรทัดนั้น ไม่ใช่ความลับที่หลุดขึ้น git
+    // ─────────────────────────────────────────────────────────────────────
+    pattern: /(Host|Server)\s*=[^\n"]*?(Password|Pwd)\s*=\s*[^;"\s{)$]{3,}/i,
+  },
+]
+
+// ─── gate ฝั่งไฟล์ config ──────────────────────────────────────────────────
+//  appsettings*.json ขึ้น git ทุกไฟล์ — ค่าลับที่หลุดลงไปจะไปโผล่บนทุกเครื่อง
+//  และไม่มีทางเรียกคืนจาก git history ได้ง่าย ๆ
+//
+//  ค่าจริงตอน dev อยู่ใน User Secrets (ดู scripts/setup-secrets.ps1)
+//  ตอน production อยู่ใน environment variable (ดู docker-compose.yml)
+const CONFIG_GATES = [
+  {
+    name: 'appsettings*.json ไม่มี password ใน connection string',
+    why: 'ไฟล์นี้ขึ้น git — password ต้องมาจาก User Secrets หรือ env var',
+    pattern: /"[^"]*(Host|Server)\s*=[^"]*(Password|Pwd)\s*=\s*[^;"\s]/i,
+  },
+  {
+    name: 'appsettings*.json ไม่มี Jwt:Key ที่มีค่า',
+    why: 'key ที่ commit ลง git คือ key ที่ปลอมโทเคนของทุก workspace ได้',
+    // จับเฉพาะค่าที่ "ไม่ว่าง" — `"Key": ""` คือการประกาศ shape ซึ่งต้องผ่าน
+    pattern: /"Key"\s*:\s*"[^"]+"/,
   },
 ]
 
@@ -178,8 +209,19 @@ const scanned = files.map((absolute) => {
   }
 })
 
+// appsettings*.json — สแกนแบบ raw ทั้งไฟล์ (JSON ไม่มีคอมเมนต์ให้ตัด และ key ที่
+// ขึ้นต้นด้วย "//" ในไฟล์พวกนี้เป็นแค่คำอธิบาย ไม่ใช่ค่าที่โปรแกรมอ่าน)
+const configFiles = (await readdir(join(ROOT, 'api')))
+  .filter((name) => /^appsettings.*\.json$/i.test(name))
+  .map((name) => ({
+    path: `api/${name}`,
+    rawLines: readFileSync(join(ROOT, 'api', name), 'utf8').split('\n'),
+  }))
+
 process.stdout.write(`\n${C.yellow}═══ Architecture gates (api) ═══${C.off}\n`)
-process.stdout.write(`${C.dim}ตรวจ ${scanned.length} ไฟล์${C.off}\n\n`)
+process.stdout.write(
+  `${C.dim}ตรวจ ${scanned.length} ไฟล์ .cs + ${configFiles.length} ไฟล์ appsettings${C.off}\n\n`,
+)
 
 let failed = false
 
@@ -193,6 +235,25 @@ for (const gate of GATES) {
       if (gate.pattern.test(line)) {
         hits.push(`${file.path}:${index + 1}  ${file.rawLines[index]?.trim() ?? ''}`)
       }
+    })
+  }
+
+  if (hits.length > 0) {
+    failed = true
+    process.stdout.write(`${C.red}✗ FAIL${C.off}  ${gate.name}\n`)
+    process.stdout.write(`${C.dim}        เหตุผล: ${gate.why}${C.off}\n`)
+    for (const hit of hits) process.stdout.write(`${C.dim}        ${hit}${C.off}\n`)
+  } else {
+    process.stdout.write(`${C.green}✓ PASS${C.off}  ${gate.name}\n`)
+  }
+}
+
+for (const gate of CONFIG_GATES) {
+  const hits = []
+
+  for (const file of configFiles) {
+    file.rawLines.forEach((line, index) => {
+      if (gate.pattern.test(line)) hits.push(`${file.path}:${index + 1}  ${line.trim()}`)
     })
   }
 

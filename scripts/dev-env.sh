@@ -5,9 +5,12 @@
 #      source scripts/dev-env.sh
 #      cd api && dotnet run
 #
-#  ทำไมต้องมี: appsettings.Development.json มี password เป็น placeholder
-#  (ห้าม commit ค่าจริง) ค่าจริงอยู่ใน .env ที่ docker compose อ่าน
-#  ถ้ารัน dotnet ตรง ๆ จะได้ 28P01 password authentication failed
+#  ℹ️ ปกติไม่ต้องใช้ไฟล์นี้แล้ว — รัน `bash scripts/setup-secrets.sh` ครั้งเดียว
+#     แล้ว `dotnet run --project api` ตรง ๆ ก็ต่อฐานได้ (password อยู่ใน User
+#     Secrets, port 5081 อยู่ใน launchSettings.json, CORS อยู่ใน appsettings)
+#
+#  ยังเก็บไว้สำหรับกรณีที่อยาก override ทุกค่าจาก .env ชั่วคราว — env var ชนะ
+#  User Secrets เสมอ
 #
 #  อ่านแบบไม่ eval เพื่อไม่ให้ค่าใน .env กลายเป็นคำสั่ง shell
 # ═══════════════════════════════════════════════════════════════════════════

@@ -7,6 +7,20 @@
     <RootNamespace>ProjectManagementAPI</RootNamespace>
     <!-- warning เป็น error: nullable ที่หลุดคือ NullReferenceException ที่รอเกิดใน production -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- ─────────────────────────────────────────────────────────────────
+         Secret Manager (dev เท่านั้น)
+
+         ค่าลับตอน dev (password ของ postgres, JWT key) เก็บนอก repo ที่
+         %APPDATA%\Microsoft\UserSecrets\<id>\secrets.json — ไม่ใช่ในไฟล์
+         appsettings.Development.json ที่ถูก commit
+
+         .NET โหลด store นี้ให้อัตโนมัติ "เฉพาะเมื่อ ASPNETCORE_ENVIRONMENT
+         = Development" เท่านั้น → production ไม่มีทางอ่านค่าจากตรงนี้
+
+         ตั้งค่าครั้งแรก:  pwsh scripts/setup-secrets.ps1
+         ───────────────────────────────────────────────────────────────── -->
+    <UserSecretsId>37957321-79d0-4c97-b2e0-f24676db57c7</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

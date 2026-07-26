@@ -2,9 +2,13 @@
 # ═══════════════════════════════════════════════════════════════════════════
 #  dotnet ef wrapper
 #
-#  ปัญหาที่แก้: appsettings.Development.json มี password เป็น placeholder
-#  (ห้าม commit ค่าจริง) ส่วนค่าจริงอยู่ใน .env ที่ฝั่ง docker compose อ่าน
-#  ถ้ารัน `dotnet ef` ตรง ๆ จะได้ 28P01 password authentication failed
+#  ℹ️ ปกติไม่ต้องใช้ไฟล์นี้แล้ว — รัน `bash scripts/setup-secrets.sh` ครั้งเดียว
+#     แล้ว `dotnet ef ... --project api` ตรง ๆ ก็ทำงานได้ เพราะ password อยู่ใน
+#     User Secrets ซึ่ง .NET โหลดให้เองตอน Development
+#
+#  ยังเก็บไว้เพราะมีประโยชน์เมื่อ:
+#    - ต้องการ override connection string ชั่วคราวโดยไม่แตะ secret store
+#    - รันบนเครื่อง/CI ที่ไม่มี User Secrets (env var ชนะ secret เสมอ)
 #
 #  script นี้อ่าน .env แล้วประกอบ connection string ที่ชี้ไปที่ postgres ใน
 #  compose (ผ่าน POSTGRES_HOST_PORT บน host) แล้วส่งเข้าเป็น env var ซึ่ง

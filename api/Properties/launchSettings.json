@@ -6,8 +6,13 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "",
-      "applicationUrl": "http://localhost:5080",
+
+      "//port": "5081 ไม่ใช่ 5080 — 5080 ถูก container pm-api ของ docker compose จองไว้แล้ว",
+      "//vite": "web/vite.config.ts proxy /api และ /hubs ไปที่ 5081 ตรงกับค่านี้",
+      "applicationUrl": "http://localhost:5081",
+
       "environmentVariables": {
+        "//": "Development เท่านั้นที่ .NET โหลด User Secrets ให้ — password กับ Jwt:Key มาจากตรงนั้น",
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
