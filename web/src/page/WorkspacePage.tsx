@@ -44,6 +44,7 @@ export function WorkspacePage() {
         await createWorkspace.mutateAsync({ name })
         void navigate('/', { replace: true })
       }}
+      onOpenSettings={() => void navigate('/settings')}
       onLogout={() => {
         void logout().then(() => navigate('/login', { replace: true }))
       }}

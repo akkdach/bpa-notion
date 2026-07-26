@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Check, ChevronsUpDown, LogOut, Plus } from 'lucide-react'
+import { Check, ChevronsUpDown, LogOut, Plus, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,11 +24,12 @@ interface WorkspaceSwitcherProps {
   userName: string
   onSelect: (workspaceId: string) => void
   onCreate: (name: string) => Promise<void>
+  onOpenSettings: () => void
   onLogout: () => void
 }
 
 export function WorkspaceSwitcher({
-  workspaces, current, userName, onSelect, onCreate, onLogout,
+  workspaces, current, userName, onSelect, onCreate, onOpenSettings, onLogout,
 }: WorkspaceSwitcherProps) {
   const [isCreating, setIsCreating] = useState(false)
   const [name, setName] = useState('')
@@ -106,6 +107,11 @@ export function WorkspaceSwitcher({
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
+
+          <DropdownMenuItem onClick={onOpenSettings} className="gap-2">
+            <Settings className="size-4" aria-hidden />
+            ตั้งค่า
+          </DropdownMenuItem>
 
           <DropdownMenuItem onClick={onLogout} className="gap-2">
             <LogOut className="size-4" aria-hidden />

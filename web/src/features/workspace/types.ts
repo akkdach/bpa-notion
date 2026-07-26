@@ -25,3 +25,48 @@ export interface CreateWorkspaceInput {
   slug?: string
   icon?: string
 }
+
+export interface WorkspaceDetail {
+  id: string
+  slug: string
+  name: string
+  icon?: string
+  myRole: WorkspaceRole
+  memberCount: number
+  createdAt: string
+}
+
+export interface UpdateWorkspaceInput {
+  name: string
+  icon?: string
+}
+
+export interface Member {
+  userId: string
+  email: string
+  name: string
+  avatarUrl?: string
+  role: WorkspaceRole
+  joinedAt: string
+}
+
+/**
+ * เพิ่มสมาชิกด้วยอีเมลของคนที่ "สมัครไว้แล้ว"
+ *
+ * ไม่มีการเชิญทางอีเมลโดยเจตนา (ไม่มี SMTP ในระบบ) — ผู้ใช้ต้องสมัครเองก่อน
+ * แล้ว admin ค่อยพิมพ์อีเมลเพิ่มเข้ามา
+ */
+export interface AddMemberInput {
+  email: string
+  role: WorkspaceRole
+}
+
+/** role ที่มอบให้คนอื่นได้ — owner โอนด้วยวิธีนี้ไม่ได้ */
+export const ASSIGNABLE_ROLES = ['admin', 'member', 'guest'] as const
+
+export const ROLE_LABELS: Record<WorkspaceRole, string> = {
+  owner: 'เจ้าของ',
+  admin: 'ผู้ดูแล',
+  member: 'สมาชิก',
+  guest: 'ผู้เยี่ยมชม',
+}

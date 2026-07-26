@@ -13,6 +13,7 @@ import { CollaborationExtension } from '@blocknote/core/yjs'
 import type * as Y from 'yjs'
 import { Cloud, CloudOff, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useResolvedTheme } from '@/features/settings'
 import type { DocStatus } from '../hooks/useYDoc'
 
 import '@blocknote/core/fonts/inter.css'
@@ -35,6 +36,8 @@ interface PageEditorProps {
 }
 
 export function PageEditor({ doc, status, editable, onChangeProjection }: PageEditorProps) {
+  const theme = useResolvedTheme()
+
   // fragment ต้องชื่อเดียวกันทุกที่ ไม่งั้นสองเครื่องจะแก้คนละเอกสาร
   const fragment = useMemo(() => doc.getXmlFragment('blocknote'), [doc])
 
@@ -85,7 +88,10 @@ export function PageEditor({ doc, status, editable, onChangeProjection }: PageEd
       <BlockNoteView
         editor={editor}
         editable={editable}
-        theme="light"
+        // ⚠️ ต้องส่ง theme เข้าไปเอง — BlockNote ไม่ได้ดูคลาส .dark บน <html>
+        //    ปล่อยไว้เป็น "light" แบบเดิมแล้วสลับเป็นโหมดมืด จะได้กล่องขาวโพลน
+        //    อยู่กลางหน้าจอดำ
+        theme={theme}
         // ภาษาไทยไม่มีช่องว่างระหว่างคำ ต้องบอกเบราว์เซอร์ให้ตัดบรรทัดถูก
         // (กฎ CSS อยู่ใน index.css ที่ :lang(th))
         lang="th"
