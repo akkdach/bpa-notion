@@ -92,8 +92,31 @@ dev environment ที่ควรอ่านเจอในโค้ด ไม
 
 ```powershell
 dotnet user-secrets list --project api      # ดูค่าที่ตั้งไว้
-pwsh scripts/setup-secrets.ps1              # ตั้งใหม่ (รันซ้ำได้ ทับค่าเดิม)
+pwsh scripts/setup-secrets.ps1              # ตั้งใหม่จาก .env (รันซ้ำได้ ทับค่าเดิม)
 ```
+
+### ชี้ไปที่ PostgreSQL ที่ไม่ใช่ Docker
+
+แก้ host/port/database ใน `api/appsettings.Development.json` แล้วเก็บ password ไว้ที่ user secrets:
+
+```powershell
+dotnet user-secrets set "Postgres:Password" "<รหัสผ่าน>" --project api
+```
+
+เซิร์ฟเวอร์ปลายทางต้องมี **PGroonga** ติดตั้งอยู่ก่อน — เป็น binary ฝั่ง server สั่ง
+`CREATE EXTENSION` เฉย ๆ ไม่พอ ตรวจได้ด้วย
+`SELECT * FROM pg_available_extensions WHERE name = 'pgroonga'` ถ้าไม่มี migration
+`AddSqlObjects` จะพังกลางคันตอนสร้าง index
+
+```bash
+dotnet run scripts/run-sql.cs db/init/001_extensions.sql   # สร้าง 3 extension
+dotnet ef database update --project api                    # ลง schema
+dotnet run scripts/run-sql.cs db/probe/thai-search-probe.sql   # ต้อง PASS ครบ 10
+```
+
+> `db/init/*.sql` ถูกรันอัตโนมัติเฉพาะตอน Docker สร้าง volume ใหม่เท่านั้น ปลายทาง
+> อื่นไม่มีอะไรรันให้ — `scripts/run-sql.cs` มีไว้เพื่อการนี้ และมันอ่าน connection
+> string ผ่าน configuration ชุดเดียวกับ api จึงชี้ฐานเดียวกันเสมอ
 
 > เปลี่ยน `POSTGRES_PASSWORD` หรือ `JWT_SECRET` ใน `.env` แล้วต้องรัน `setup-secrets`
 > ซ้ำ — สอง store นี้ไม่ได้ sync กันเอง

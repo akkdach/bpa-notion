@@ -28,13 +28,25 @@ function check(label, ok, detail = '') {
   else { failed++; console.log(`  ${C.red}✗${C.off} ${label}${detail ? `\n      ${C.dim}${detail}${C.off}` : ''}`) }
 }
 
-/** รัน SQL ผ่าน docker compose exec — ไม่ต้องพึ่ง driver ฝั่ง Node */
+const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+
+/**
+ * รัน SQL กับ "ฐานเดียวกับที่ API กำลังใช้อยู่"
+ *
+ * ⚠️ ห้ามกลับไปใช้ `docker compose exec postgres psql` — ของเดิมเป็นแบบนั้นและมี
+ *    ปัญหาสองชั้น: (1) พังทันทีถ้าปลายทางไม่ใช่ Docker (2) ร้ายกว่านั้นคือมัน
+ *    hardcode ชื่อฐาน 'projectmanagement' ไว้ ถ้า API ชี้ฐานอื่น สคริปต์นี้จะไป
+ *    ทำข้อมูลฐานหนึ่งให้เพี้ยน แล้วไปตรวจอีกฐานหนึ่ง — ได้ผลว่า "ซ่อมสำเร็จ"
+ *    ทั้งที่ไม่เคยมีอะไรเพี้ยนให้ซ่อมเลย
+ *
+ *    run-sql.cs อ่าน connection string ผ่าน configuration ชุดเดียวกับ api
+ *    จึงชี้ปลายทางเดียวกันเสมอโดยไม่ต้องตั้งค่าซ้ำ
+ */
 function psql(sql) {
   return execFileSync(
-    'docker',
-    ['compose', 'exec', '-T', 'postgres', 'psql', '-U', 'postgres',
-     '-d', 'projectmanagement', '-v', 'ON_ERROR_STOP=1', '-t', '-A', '-c', sql],
-    { encoding: 'utf8', cwd: new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1') },
+    'dotnet',
+    ['run', 'scripts/run-sql.cs', '-', '--quiet'],
+    { encoding: 'utf8', cwd: ROOT, input: sql },
   ).trim()
 }
 

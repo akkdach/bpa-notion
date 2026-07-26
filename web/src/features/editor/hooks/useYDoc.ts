@@ -133,16 +133,54 @@ export function useYDoc(pageId: string | undefined): UseYDocResult {
         const remote = await docApi.fetchDocument(pageId!, controller.signal)
         if (disposed) return
 
+        const frames = remote.frames.filter((frame) => frame.length > 0)
+
+        // state vector ของ "ฝั่งเซิร์ฟเวอร์" — คำนวณจาก frame ตรง ๆ ไม่ต้องสร้าง
+        // Y.Doc ชั่วคราวมาไล่ apply
+        const serverState = frames.length > 0
+          ? Y.encodeStateVectorFromUpdate(Y.mergeUpdates(frames))
+          : Y.encodeStateVector(new Y.Doc())
+
         // ⚠️ origin = 'bootstrap' เพื่อไม่ให้ handleUpdate ส่งกลับขึ้นเซิร์ฟเวอร์
         //    Yjs idempotent อยู่แล้วจึงไม่เสียหาย แต่จะเปลือง log ฟรี ๆ
         ydoc.transact(() => {
-          for (const frame of remote.frames) {
-            if (frame.length > 0) Y.applyUpdate(ydoc, frame, 'bootstrap')
-          }
+          for (const frame of frames) Y.applyUpdate(ydoc, frame, 'bootstrap')
         }, 'bootstrap')
 
         headSeq = remote.headSeq
+
+        // ต้องต่อ listener ก่อนคำนวณส่วนต่าง ไม่ใช่หลัง — update ที่แทรกมาระหว่าง
+        // สองบรรทัดนี้จะถูกนับสองครั้ง ซึ่งไม่เป็นไร (Yjs idempotent) แต่ถ้าสลับ
+        // ลำดับกันมันจะหายไปเลย
         ydoc.on('update', handleUpdate)
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ส่งสิ่งที่ "เรามีแต่เซิร์ฟเวอร์ไม่มี" ขึ้นไป
+        //
+        //  ⚠️ ขาดบรรทัดนี้ไปแล้วข้อมูลหายจริง — เคยเกิดมาแล้ว:
+        //
+        //  ระหว่างที่ bootstrap รอเครือข่ายอยู่ BlockNote mount เสร็จและใส่
+        //  ย่อหน้าว่างเริ่มต้นลง fragment ทันที update ก้อนนั้นเกิด "ก่อน"
+        //  listener ถูกต่อ จึงไม่มีใครส่งขึ้นเซิร์ฟเวอร์เลย พอผู้ใช้พิมพ์ต่อ
+        //  update ถัด ๆ มาอ้างถึงโครงสร้างก้อนแรกที่เซิร์ฟเวอร์ไม่เคยได้รับ
+        //  → Yjs ฝั่งเซิร์ฟเวอร์ integrate ไม่ได้ ค้างเป็น pendingStructs
+        //  → เปิดหน้าจากเครื่องอื่น (หรือหลังล้าง IndexedDB) ได้หน้าว่าง
+        //
+        //  บนเครื่อง dev ที่ฐานอยู่ localhost แทบไม่เกิด เพราะ bootstrap เสร็จ
+        //  ก่อน editor จะ mount แต่พอฐานอยู่คนละเครื่อง (หน่วงเป็นร้อย ms)
+        //  มันเกิดทุกครั้ง — เป็นบั๊กที่ latency เป็นคนเปิดโปง
+        //
+        //  ครอบคลุมกรณีออฟไลน์ด้วย: เนื้อหาที่พิมพ์ไว้ตอนไม่มีเน็ตอยู่ใน
+        //  IndexedDB (origin = persistence ซึ่ง handleUpdate ข้าม) ส่วนต่าง
+        //  ตรงนี้คือทางเดียวที่มันจะได้ขึ้นเซิร์ฟเวอร์
+        // ─────────────────────────────────────────────────────────────────
+        const missing = Y.encodeStateAsUpdate(ydoc, serverState)
+
+        // update ว่างของ Yjs คือ 2 ไบต์ ([0,0]) — ส่งขึ้นไปก็เปลือง log เปล่า
+        if (missing.length > 2) {
+          pending.push(missing)
+          flushTimer ??= setTimeout(() => void flush(), FLUSH_DELAY_MS)
+        }
 
         setSync({ pageId, status: 'ready', error: null })
       } catch (cause) {
