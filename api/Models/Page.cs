@@ -47,6 +47,15 @@ public class Page
     public string? Icon { get; set; }
     public string? CoverUrl { get; set; }
 
+    /// <summary>
+    /// สถานะงานอย่างง่าย: todo / doing / done — null = หน้านี้ไม่ใช่ "งาน"
+    ///
+    /// เป็นคอลัมน์ชั้นหนึ่งแยกจาก Properties (ซึ่งเป็น property ของ db_row ใน Phase 4)
+    /// เพื่อให้ query/filter/sort งานได้ตรง ๆ โดยไม่ต้องแกะ jsonb
+    /// ใช้โดย MCP (Claude Code) เป็นหลัก — ดู mcp/ ใน repo
+    /// </summary>
+    public string? Status { get; set; }
+
     /// <summary>ค่า property ของแถว database (Phase 4) — key เป็น property UUID</summary>
     public JsonDocument? Properties { get; set; }
 

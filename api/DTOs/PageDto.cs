@@ -12,7 +12,8 @@ public record CreatePageRequest(
     string? Icon,
     Guid? AfterPageId);
 
-public record UpdatePageRequest(string? Title, string? Icon, string? CoverUrl);
+/// <param name="Status">สถานะงาน: todo / doing / done — "" (สตริงว่าง) = ล้างสถานะ (ไม่ใช่งาน)</param>
+public record UpdatePageRequest(string? Title, string? Icon, string? CoverUrl, string? Status = null);
 
 /// <param name="ParentId">parent ใหม่ — null = ย้ายขึ้นระดับบนสุด</param>
 /// <param name="AfterPageId">วางต่อจากหน้านี้ในกลุ่มพี่น้องใหม่ — null = ท้ายสุด</param>
@@ -28,6 +29,7 @@ public record PageDto(
     string Title,
     string? Icon,
     string? CoverUrl,
+    string? Status,
     Guid AccessRootId,
     string MyRole,
     DateTimeOffset CreatedAt,
@@ -40,6 +42,7 @@ public record PageNodeDto(
     Guid? ParentId,
     string Title,
     string? Icon,
+    string? Status,
     string Rank,
     int Depth,
     bool HasChildren,

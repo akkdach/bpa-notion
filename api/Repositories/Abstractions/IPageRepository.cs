@@ -28,6 +28,9 @@ public interface IPageRepository
 
     Task UpdateIconAsync(Guid pageId, string? icon, string? coverUrl, CancellationToken ct = default);
 
+    /// <summary>เซ็ตสถานะงาน (null = ล้างสถานะ ให้กลับเป็นหน้าปกติ)</summary>
+    Task UpdateStatusAsync(Guid pageId, string? status, Guid editorId, CancellationToken ct = default);
+
     /// <summary>
     /// ย้ายหน้า (พร้อมลูกหลานทั้งหมด) ไปใต้ parent ใหม่
     /// ต้องเป็น UPDATE เดียวสำหรับ subtree ไม่ใช่ loop
@@ -85,6 +88,7 @@ public record PageNode(
     Guid? ParentId,
     string Title,
     string? Icon,
+    string? Status,
     string Rank,
     int Depth,
     PageKind Kind,

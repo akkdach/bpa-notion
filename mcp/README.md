@@ -1,0 +1,116 @@
+# MCP server — ให้ Claude Code สั่งงานแอปได้
+
+MCP server แบบ stdio ที่ครอบ REST API ของ `api/` ให้ Claude Code เรียกเป็น tool
+ได้โดยตรง คุยกับ API ผ่าน HTTP เหมือน client ทั่วไป **ไม่แตะฐานข้อมูลเอง** จึงได้
+tenant isolation, permission check และ validation ชุดเดียวกับที่เว็บได้
+
+```
+Claude Code  ──stdio/JSON-RPC──▶  ProjectManagementMcp  ──HTTP──▶  api/  ──▶  PostgreSQL
+```
+
+---
+
+## ตั้งค่าครั้งแรก
+
+```powershell
+pwsh scripts/setup-mcp.ps1
+```
+
+สคริปต์จะ build เป็น Release แล้วถามอีเมล/รหัสผ่านของบัญชีในแอป เก็บลง
+[.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets)
+ที่ `%APPDATA%\Microsoft\UserSecrets\` — **นอก repo** จากนั้น
+
+1. เปิด API ทิ้งไว้ — `dotnet run --project api`
+2. เปิด Claude Code ใหม่ในโฟลเดอร์ `d:/Projects/notion` แล้วอนุญาต MCP server ชื่อ `projectmanagement`
+3. ตรวจด้วย `/mcp` — ต้องเห็นสถานะ connected
+
+> AI จะเห็นและแก้ได้**เท่าที่บัญชีนั้นเห็นและแก้ได้** ไม่มีสิทธิ์พิเศษ ถ้าอยากจำกัด
+> ขอบเขต ให้สร้างบัญชีแยกแล้วเชิญเข้าเฉพาะ workspace ที่ต้องการ
+
+## config
+
+อ่านจากสองที่ **User Secrets ชนะ env var**
+
+| User Secrets | env var | ค่าเริ่มต้น |
+|---|---|---|
+| `Pm:ApiUrl` | `PM_API_URL` | `http://localhost:5081` |
+| `Pm:Email` | `PM_EMAIL` | *(จำเป็น)* |
+| `Pm:Password` | `PM_PASSWORD` | *(จำเป็น)* |
+| `Pm:Workspace` | `PM_WORKSPACE` | ข้ามได้ถ้าบัญชีมี workspace เดียว |
+
+env var มีไว้สำหรับ container / CI ที่ไม่มี secret store ส่วนบนเครื่อง dev ใช้
+User Secrets เพราะไม่ต้องตั้งใหม่ทุก shell และ **Claude Code สั่งรัน MCP server
+เป็น process ลูกที่ไม่ได้สืบทอด env จาก terminal ที่คุณเปิดอยู่เสมอไป**
+
+> ⚠️ `Host.CreateApplicationBuilder` โหลด Secret Manager ให้เฉพาะตอน environment
+> เป็น Development เท่านั้น MCP ถูกสั่งรันโดยไม่มี `DOTNET_ENVIRONMENT` จึงตกเป็น
+> Production — `Program.cs` จึงเรียก `AddUserSecrets` เองอย่างชัดเจน ไม่งั้น secret
+> จะหายไปเงียบ ๆ แล้วขึ้นว่า "ยังไม่ได้ตั้ง Pm:Email" ทั้งที่ตั้งไปแล้ว
+
+## tools ที่มี
+
+โมเดล: **โปรเจกต์ = หน้าระดับบนสุด, งาน = หน้าลูกใต้โปรเจกต์** สถานะเก็บใน
+`pages.status` (`todo` / `doing` / `done`, `null` = ไม่ใช่งาน)
+
+| tool | ทำอะไร |
+|---|---|
+| `list_projects` | โปรเจกต์ทั้งหมด พร้อมจำนวนงานค้าง |
+| `list_tasks` | งานใต้โปรเจกต์ กรองด้วย status ได้ ซ่อน done เป็นค่าเริ่มต้น |
+| `get_task` | รายละเอียดหน้าหนึ่ง พร้อมงานลูก |
+| `create_project` | สร้างหน้าระดับบนสุด |
+| `create_task` | สร้างหน้าลูกพร้อมสถานะ |
+| `update_task` | เปลี่ยนชื่อ / สถานะ / ไอคอน |
+| `complete_task` | ตั้งสถานะเป็น done |
+
+## ข้อจำกัดที่ต้องรู้
+
+**AI อ่านหรือเขียนเนื้อหาในหน้าไม่ได้** — แตะได้แค่ชื่อ สถานะ ไอคอน และโครงสร้าง
+
+เนื้อหาของหน้าเป็น Yjs CRDT เก็บเป็น `bytea` ทึบ ๆ ที่เซิร์ฟเวอร์อ่านไม่ออกโดยเจตนา
+(ดู PLAN.md "การตัดสินใจเชิงสถาปัตยกรรม ข้อ 1") ส่วน `POST /projection` ที่รับ plain
+text เป็นทางเข้า search index เท่านั้น — **เขียนไปแล้วเบราว์เซอร์จะทับทิ้งใน 2 วินาที**
+เพราะ client ผลิต projection ใหม่จาก Y.Doc ตัวจริงเสมอ
+
+การเปิดทางให้อ่าน/เขียนเนื้อหาต้องเพิ่ม `GET/PUT /pages/{id}/content` ฝั่ง API โดยใช้
+[YDotNet](https://www.nuget.org/packages/YDotNet) (binding ของ `yrs` ที่เขียนด้วย Rust)
+เป็นงานที่วางแผนไว้แล้วแต่ยังไม่ทำ
+
+> ⚠️ ขาเขียนมีขอบมีด: ถ้าสร้างโครงสร้างผิด schema ของ BlockNote แม้แต่นิดเดียว
+> `createNodeFromYElement` ของ y-prosemirror จะ **ลบ element นั้นทิ้งแล้วกระจาย
+> การลบไปทุก client** ไม่ใช่แค่ render พลาด — เป็นการทำข้อมูลหายจริง ต้องมี
+> round-trip test ที่โหลดกลับใน BlockNote จริงก่อนปล่อย
+
+ยังไม่มี tool สำหรับ: ย้าย/ลบ/กู้คืนหน้า, ค้นหา (ยังไม่มี `SearchController`),
+จัดการสมาชิก, database views
+
+## ตรวจว่าใช้ได้จริง
+
+```bash
+dotnet run --project api          # ต้องเปิดค้างไว้ก่อน
+node scripts/verify-mcp.mjs       # 25 เคส
+```
+
+สคริปต์นี้สมัครบัญชีใช้แล้วทิ้งของตัวเอง ส่ง credential ให้ MCP ทาง env var จึงไม่แตะ
+User Secrets ของคุณ แล้วพูด JSON-RPC กับ MCP server จริง ๆ ตั้งแต่ `initialize`,
+`tools/list` ไปจนถึง `tools/call`
+
+ที่มันตรวจแล้ว compiler ตรวจไม่ได้:
+
+- **ไม่มีอะไรที่ไม่ใช่ JSON-RPC หลุดลง stdout** — stdio ใช้ stdout เป็นช่องโปรโตคอล
+  `Console.WriteLine` หรือ log ที่หลุดมาแม้บรรทัดเดียวทำให้ client parse ไม่ได้ทั้ง
+  session (`Program.cs` จึงบังคับ log ทุกอย่างไป stderr)
+- **tool ถูกค้นเจอครบและมี inputSchema ถูกต้อง** — ลืม attribute แล้ว tool หายไป
+  เงียบ ๆ โดย build ยังผ่าน
+- **error กลับไปเป็นข้อความที่อ่านรู้เรื่อง** — MCP SDK กลืนข้อความของ exception ทิ้ง
+  แล้วส่งกลับแค่ `"An error occurred invoking 'xxx'."` ทำให้ Claude ไม่รู้ว่าพลาดตรงไหน
+  แล้วมักลองซ้ำแบบเดิมวนไป `TaskTools.Run` จึงดักไว้เองทุกตัว
+
+## แก้ปัญหา
+
+| อาการ | สาเหตุ |
+|---|---|
+| `/mcp` ขึ้น failed | ยังไม่ได้ build — รัน `pwsh scripts/setup-mcp.ps1` |
+| `ต่อ API ไม่ได้ที่ …` | ยังไม่ได้เปิด API หรือ `Pm:ApiUrl` ผิด port (dev = 5081, container = 5080) |
+| `ยังไม่ได้ตั้ง Pm:Email` | รัน `pwsh scripts/setup-mcp.ps1` |
+| `มีหลาย workspace` | ตั้ง `Pm:Workspace` เป็น slug หรือ GUID |
+| `API 500 … column p.status does not exist` | ยังไม่ได้ลง migration — `dotnet ef database update --project api` |

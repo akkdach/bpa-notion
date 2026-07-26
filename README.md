@@ -140,15 +140,20 @@ dotnet run scripts/run-sql.cs db/probe/thai-search-probe.sql   # ต้อง PA
 │   ├─ Repositories/           ← ที่เดียวที่ AppDbContext ปรากฏ
 │   ├─ Data/                   ← AppDbContext, TenantContext, Migrations/
 │   ├─ Models/ Domain/ DTOs/ Mapping/ Validators/ Filters/ Middlewares/ Helpers/
-└─ web/                        ← Vite + React 19
-    └─ src/
-        ├─ lib/                ← apiClient, queryClient, cn()
-        ├─ components/{ui,common,layout}/
-        ├─ features/<domain>/{service,hooks,components}/ + index.ts
-        ├─ page/               ← ประกอบ route เท่านั้น
-        ├─ realtime/           ← SignalRProvider (Phase 2)
-        └─ app/                ← App.tsx, routes.tsx
+├─ web/                        ← Vite + React 19
+│   └─ src/
+│       ├─ lib/                ← apiClient, queryClient, cn()
+│       ├─ components/{ui,common,layout}/
+│       ├─ features/<domain>/{service,hooks,components}/ + index.ts
+│       ├─ page/               ← ประกอบ route เท่านั้น
+│       ├─ realtime/           ← SignalRProvider (Phase 2)
+│       └─ app/                ← App.tsx, routes.tsx
+├─ mcp/                        ← MCP server ให้ Claude Code สั่งงานแอปได้ (ดู mcp/README.md)
+└─ .mcp.json                   ← Claude Code อ่านไฟล์นี้เพื่อรู้จัก MCP server ข้างบน
 ```
+
+> `mcp/` คุยกับแอปผ่าน REST API เหมือน client ทั่วไป **ไม่แตะฐานข้อมูลเอง** จึงได้
+> tenant isolation และ permission check ชุดเดียวกับที่เว็บได้ ไม่ต้องเขียนซ้ำ
 
 ---
 

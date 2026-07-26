@@ -150,6 +150,29 @@ public class PageTreeService(
             page.CoverUrl = request.CoverUrl;
         }
 
+        // สถานะงาน — "" (สตริงว่าง) = ล้างสถานะ, null = ไม่แตะ
+        if (request.Status is not null)
+        {
+            var status = request.Status.Trim().ToLowerInvariant();
+
+            if (status.Length == 0)
+            {
+                await pages.UpdateStatusAsync(pageId, null, tenant.RequireUserId(), ct);
+                page.Status = null;
+            }
+            else if (AllowedStatuses.Contains(status))
+            {
+                await pages.UpdateStatusAsync(pageId, status, tenant.RequireUserId(), ct);
+                page.Status = status;
+            }
+            else
+            {
+                return Error.Validation(
+                    $"สถานะต้องเป็นหนึ่งใน: {string.Join(", ", AllowedStatuses)} (หรือค่าว่างเพื่อล้าง)",
+                    "invalid_status");
+            }
+        }
+
         return page.ToDto(role.Value);
     }
 
@@ -365,6 +388,10 @@ public class PageTreeService(
 
         return new RepairResultDto(fixedAncestors, fixedRoots);
     }
+
+    // สถานะงานที่อนุญาต — เก็บชิดกับ logic ที่ validate เพื่อไม่ให้หลุด sync
+    private static readonly HashSet<string> AllowedStatuses =
+        new(StringComparer.Ordinal) { "todo", "doing", "done" };
 
     private static Error PageNotFound => Error.NotFound("ไม่พบหน้านี้", "page_not_found");
 

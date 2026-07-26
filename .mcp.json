@@ -1,0 +1,17 @@
+{
+  "//": "MCP server ของโปรเจกต์นี้ — Claude Code อ่านไฟล์นี้อัตโนมัติเมื่อเปิด d:/Projects/notion",
+  "//setup": "ครั้งแรกให้รัน: pwsh scripts/setup-mcp.ps1 (build + ตั้ง credential)",
+  "//secrets": "ไม่มีรหัสผ่านในไฟล์นี้โดยเจตนา — มันขึ้น git ค่าจริงอยู่ใน .NET User Secrets",
+  "//api": "ต้องมี API รันอยู่ก่อน: dotnet run --project api  (หรือ docker compose up -d)",
+
+  "mcpServers": {
+    "projectmanagement": {
+      "//command": "รัน .dll ตรง ๆ ไม่ใช้ `dotnet run` — dotnet run พิมพ์ข้อความ build ลง stdout ซึ่งเป็นช่อง JSON-RPC ของ MCP",
+      "command": "dotnet",
+      "args": [
+        "mcp/bin/Release/net10.0/ProjectManagementMcp.dll"
+      ],
+      "env": {}
+    }
+  }
+}

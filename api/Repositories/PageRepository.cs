@@ -45,6 +45,7 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
                 p.ParentId,
                 p.Title,
                 p.Icon,
+                p.Status,
                 p.Rank,
                 p.Depth,
                 p.Kind,
@@ -68,7 +69,7 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
              .Where(p => p.DeletedAt != null)
              .OrderByDescending(p => p.DeletedAt)
              .Select(p => new PageNode(
-                 p.Id, p.ParentId, p.Title, p.Icon, p.Rank, p.Depth, p.Kind,
+                 p.Id, p.ParentId, p.Title, p.Icon, p.Status, p.Rank, p.Depth, p.Kind,
                  p.AccessRootId, false, p.UpdatedAt, p.DeletedAt))
              .ToListAsync(ct);
 
@@ -118,6 +119,15 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
              .ExecuteUpdateAsync(s => s
                  .SetProperty(p => p.Icon, icon)
                  .SetProperty(p => p.CoverUrl, coverUrl)
+                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
+
+    public Task UpdateStatusAsync(
+        Guid pageId, string? status, Guid editorId, CancellationToken ct = default)
+        => db.Pages
+             .Where(p => p.Id == pageId)
+             .ExecuteUpdateAsync(s => s
+                 .SetProperty(p => p.Status, status)
+                 .SetProperty(p => p.LastEditedBy, editorId)
                  .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
 
     // ═══════════════════════════════════════════════════════════════════════

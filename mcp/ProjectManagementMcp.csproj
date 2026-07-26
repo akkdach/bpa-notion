@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ProjectManagementMcp</RootNamespace>
+    <!-- เหมือน api/ — warning ที่ปล่อยผ่านคือบั๊กที่รอเกิด -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- ─────────────────────────────────────────────────────────────────
+         credential ของบัญชีที่ MCP ใช้ login เก็บใน Secret Manager
+         ไม่ใช่ใน .mcp.json ที่ขึ้น git และไม่ใช่ env var ที่ต้องตั้งใหม่ทุก shell
+
+         ตั้งด้วย:  pwsh scripts/setup-mcp.ps1
+         ───────────────────────────────────────────────────────────────── -->
+    <UserSecretsId>aa263f5e-d755-41d8-b0b2-a5b268e2342a</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <!-- ⚠️ Host.CreateApplicationBuilder โหลด User Secrets ให้เฉพาะตอน
+         Development เท่านั้น MCP รันโดยไม่มี DOTNET_ENVIRONMENT จึงต้อง
+         อ้าง package นี้ตรง ๆ แล้วเรียก AddUserSecrets เองใน Program.cs -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.10" />
+    <PackageReference Include="ModelContextProtocol" Version="2.0.0-rc.1" />
+  </ItemGroup>
+
+</Project>

@@ -58,6 +58,9 @@ public class PageConfiguration : IEntityTypeConfiguration<Page>
         builder.Property(p => p.Icon).HasMaxLength(200);
         builder.Property(p => p.CoverUrl).HasMaxLength(1000);
 
+        // สถานะงาน — null = ไม่ใช่งาน จึงไม่ต้องมี default
+        builder.Property(p => p.Status).HasMaxLength(20);
+
         // JsonDocument (ไม่ใช่ POCO) แปลว่าไม่ต้องเปิด Npgsql EnableDynamicJson()
         builder.Property(p => p.Properties).HasColumnType("jsonb");
         builder.Property(p => p.Computed).HasColumnType("jsonb");
