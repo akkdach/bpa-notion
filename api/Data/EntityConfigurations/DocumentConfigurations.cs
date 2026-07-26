@@ -89,3 +89,43 @@ public class PageSearchConfiguration : IEntityTypeConfiguration<PageSearch>
         //    (ค่า default ทำให้ค้นภาษาไทยพัง — ดู db/probe/thai-search-probe.sql)
     }
 }
+
+public class PageLinkConfiguration : IEntityTypeConfiguration<PageLink>
+{
+    public void Configure(EntityTypeBuilder<PageLink> builder)
+    {
+        builder.HasKey(l => new { l.SourcePageId, l.TargetPageId });
+
+        builder.Property(l => l.UpdatedAt).HasDefaultValueSql("now()");
+
+        // ─────────────────────────────────────────────────────────────────
+        //  composite FK ทั้งสองฝั่ง
+        //
+        //  ลิงก์ข้าม workspace จึงเป็นสิ่งที่ "เขียนลงฐานไม่ได้" ไม่ใช่แค่ไม่ควรเกิด
+        //  — ถ้ามีแต่ FK ธรรมดาไป pages(id) การเผลอเขียน workspace_id ผิดจะผ่าน
+        //  ฉลุยแล้วกลายเป็นช่องอ่านข้าม tenant ผ่านแผง backlinks
+        //
+        //  Cascade ทั้งสองฝั่ง: ลบหน้าไหนก็ต้องไม่เหลือ edge ห้อยไว้ ทั้งขาออก
+        //  และขาเข้า
+        //
+        //  ⚠️ ข้อห้าม "multiple cascade path มาที่ตารางเดียวกัน" เป็นข้อจำกัดของ
+        //     SQL Server ไม่ใช่ PostgreSQL — Postgres ยอมทั้งสองทาง ถ้าเผลอตั้ง
+        //     ฝั่ง target เป็น NoAction เพราะกลัวข้อจำกัดนั้น ผลคือ "ลบหน้าที่มี
+        //     คนลิงก์มาไม่ได้เลย" ซึ่งพังในการใช้งานปกติ
+        // ─────────────────────────────────────────────────────────────────
+        builder.HasOne<Page>()
+               .WithMany()
+               .HasForeignKey(l => new { l.WorkspaceId, l.SourcePageId })
+               .HasPrincipalKey(p => new { p.WorkspaceId, p.Id })
+               .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne<Page>()
+               .WithMany()
+               .HasForeignKey(l => new { l.WorkspaceId, l.TargetPageId })
+               .HasPrincipalKey(p => new { p.WorkspaceId, p.Id })
+               .OnDelete(DeleteBehavior.Cascade);
+
+        // ทางอ่านหลักคือย้อนกลับ: "หน้านี้ถูกอ้างถึงจากที่ไหน"
+        builder.HasIndex(l => new { l.WorkspaceId, l.TargetPageId });
+    }
+}

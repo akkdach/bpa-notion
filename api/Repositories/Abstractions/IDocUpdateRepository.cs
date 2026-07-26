@@ -36,7 +36,24 @@ public interface IDocUpdateRepository
     Task UpsertSearchProjectionAsync(
         Guid pageId, Guid accessRootId, string title, string bodyText,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// เขียนลิงก์ออกของหน้าหนึ่งทับทั้งชุด คืนจำนวนเป้าหมายที่รับไว้จริง
+    /// </summary>
+    /// <remarks>
+    /// เป้าหมายที่ไม่มีอยู่ หรืออยู่ workspace อื่น จะถูกทิ้งเงียบ ๆ ไม่ใช่ error —
+    /// projection เป็นข้อมูล derived ที่ client ส่งมาแบบ best-effort การทำให้
+    /// การพิมพ์ล้มเหลวเพราะ mention ชี้ไปหน้าที่เพิ่งถูกลบนั้นไม่คุ้มเลย
+    /// </remarks>
+    Task<int> ReplacePageLinksAsync(
+        Guid sourcePageId, IReadOnlyList<Guid> targetPageIds, CancellationToken ct = default);
+
+    /// <summary>หน้าที่ลิงก์มาหาหน้านี้ — เรียงหน้าที่แก้ล่าสุดขึ้นก่อน</summary>
+    Task<IReadOnlyList<PageLinkSource>> GetBacklinksAsync(
+        Guid targetPageId, int limit, CancellationToken ct = default);
 }
+
+public record PageLinkSource(Guid Id, string Title, string? Icon, DateTimeOffset UpdatedAt);
 
 /// <param name="Snapshot">null ถ้ายังไม่เคย compact</param>
 /// <param name="Updates">update ที่เกิดหลัง snapshot เรียงตาม seq</param>

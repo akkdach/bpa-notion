@@ -63,4 +63,14 @@ public record BreadcrumbDto(Guid Id, string Title, string? Icon);
 //  แปลงเป็น plain text ให้ ข้อมูลนี้ derived ทั้งหมด — ถ้าล้าสมัยผลค้นหา
 //  ล้าสมัย แต่ไม่มีอะไรเสียหายและสร้างใหม่ได้เสมอ
 // ═══════════════════════════════════════════════════════════════════════════
-public record ProjectionRequest(string? Title, string? PlainText);
+/// <param name="Links">
+/// id ของหน้าที่ถูก mention ในเนื้อหา — เขียนทับทั้งชุดต่อหนึ่งหน้า (replace-all)
+///
+/// null = ไม่ได้ส่งมา ให้คงลิงก์เดิมไว้ (client รุ่นเก่าที่ยังไม่รู้จักช่องนี้)
+/// [] = ส่งมาแต่ไม่มีลิงก์เลย ให้ลบทั้งหมด
+/// ความต่างนี้สำคัญ ไม่งั้นการอัปเดต client จะล้างลิงก์ของทุกหน้าทิ้ง
+/// </param>
+public record ProjectionRequest(string? Title, string? PlainText, IReadOnlyList<Guid>? Links = null);
+
+/// <summary>หน้าที่ลิงก์มาหาหน้านี้ (แผง backlinks)</summary>
+public record BacklinkDto(Guid Id, string Title, string? Icon, DateTimeOffset UpdatedAt);

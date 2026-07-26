@@ -39,6 +39,7 @@ public class AppDbContext(
     public DbSet<PageDocUpdate> PageDocUpdates => Set<PageDocUpdate>();
     public DbSet<PageDocSnapshot> PageDocSnapshots => Set<PageDocSnapshot>();
     public DbSet<PageSearch> PageSearches => Set<PageSearch>();
+    public DbSet<PageLink> PageLinks => Set<PageLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -85,6 +86,9 @@ public class AppDbContext(
 
         modelBuilder.Entity<PageSearch>()
             .HasQueryFilter(TenantFilter, s => s.WorkspaceId == CurrentWorkspaceId);
+
+        modelBuilder.Entity<PageLink>()
+            .HasQueryFilter(TenantFilter, l => l.WorkspaceId == CurrentWorkspaceId);
 
         modelBuilder.Entity<WorkspaceMember>()
             .HasQueryFilter(TenantFilter, m => m.WorkspaceId == CurrentWorkspaceId);

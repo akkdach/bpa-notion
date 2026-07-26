@@ -32,6 +32,14 @@ public class DocumentService(
     /// </summary>
     private const double SuspiciousShrinkRatio = 0.5;
 
+    /// <summary>
+    /// จำนวน backlink สูงสุดที่คืนกลับ
+    ///
+    /// มีเพดานเพราะแต่ละแถวต้องเช็คสิทธิ์ทีละหน้า — หน้าที่ถูกอ้างถึงจาก 5,000 ที่
+    /// (เช่นหน้าสารบัญกลาง) จะกลายเป็น 5,000 permission check ต่อการเปิดหนึ่งครั้ง
+    /// </summary>
+    private const int BacklinkLimit = 50;
+
     public async Task<Result<DocumentBootstrap>> GetBootstrapAsync(
         Guid pageId, CancellationToken ct = default)
     {
@@ -226,7 +234,50 @@ public class DocumentService(
             Truncate(request.PlainText ?? string.Empty),
             ct);
 
+        // ⚠️ null ≠ ว่าง — null คือ "client ไม่ได้ส่งช่องนี้มา" ให้คงลิงก์เดิม
+        //    ถ้าตีความ null เป็น [] การ deploy โค้ดใหม่ทับ client เก่าจะล้างลิงก์
+        //    ของทุกหน้าทิ้งทีละหน้าตามที่ผู้ใช้เปิด — ความเสียหายแบบค่อยเป็นค่อยไป
+        //    ที่ไม่มีใครสังเกตจนสาย
+        if (request.Links is not null)
+        {
+            await documents.ReplacePageLinksAsync(pageId, request.Links, ct);
+        }
+
         return Result.Success();
+    }
+
+    /// <summary>หน้าที่ลิงก์มาหาหน้านี้</summary>
+    public async Task<Result<IReadOnlyList<BacklinkDto>>> GetBacklinksAsync(
+        Guid pageId, CancellationToken ct = default)
+    {
+        // ต้องมีสิทธิ์เห็นหน้าเป้าหมายก่อน ไม่งั้นรายการ backlink กลายเป็นช่อง
+        // สำรวจว่าใน workspace มีหน้าอะไรอยู่บ้างโดยไม่ต้องมีสิทธิ์เห็นหน้านั้น
+        var role = await permissions.GetEffectiveRoleAsync(pageId, ct);
+        if (role is null) return PageNotFound;
+
+        var sources = await documents.GetBacklinksAsync(pageId, BacklinkLimit, ct);
+
+        // ─────────────────────────────────────────────────────────────────
+        //  กรองตามสิทธิ์ของ "หน้าต้นทาง" ทีละหน้า
+        //
+        //  ⚠️ สิทธิ์เห็นหน้า A ไม่ได้แปลว่ามีสิทธิ์รู้ว่าหน้า B ลิงก์มาหา A —
+        //     B อาจอยู่ใต้ access root ที่ผู้ใช้เข้าไม่ได้ ชื่อของ B เองก็เป็น
+        //     ข้อมูลที่รั่วได้ ("แผนปรับเงินเดือน 2026" ลิงก์มาหาหน้านี้)
+        //
+        //  ยอมจ่ายเป็น N query เพราะ PermissionService memo ต่อ request อยู่แล้ว
+        //  และ BacklinkLimit จำกัดไว้ที่ 50 — ถ้าถึงจุดที่ช้า ทางแก้คือ query
+        //  เดียวที่กรองด้วย access_root_id = ANY($visibleRoots) เหมือนที่ search
+        //  จะทำ ไม่ใช่การเลิกกรอง
+        // ─────────────────────────────────────────────────────────────────
+        var visible = new List<BacklinkDto>(sources.Count);
+
+        foreach (var source in sources)
+        {
+            if (await permissions.GetEffectiveRoleAsync(source.Id, ct) is null) continue;
+            visible.Add(new BacklinkDto(source.Id, source.Title, source.Icon, source.UpdatedAt));
+        }
+
+        return visible;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

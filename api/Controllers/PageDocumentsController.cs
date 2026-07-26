@@ -103,6 +103,11 @@ public class PageDocumentsController(IDocumentService documents) : ControllerBas
         Guid pageId, ProjectionRequest request, CancellationToken ct)
         => (await documents.SaveProjectionAsync(pageId, request, ct)).ToActionResult();
 
+    /// <summary>หน้าที่ลิงก์มาหาหน้านี้ (แผง backlinks)</summary>
+    [HttpGet("backlinks")]
+    public async Task<IActionResult> GetBacklinks(Guid pageId, CancellationToken ct)
+        => (await documents.GetBacklinksAsync(pageId, ct)).ToActionResult();
+
     // ─────────────────────────────────────────────────────────────────────
     //  อ่าน body แบบไบนารี
     //

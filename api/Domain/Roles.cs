@@ -36,10 +36,25 @@ public enum PageKind
     DbRow = 2
 }
 
+/// <summary>
+/// ผู้รับสิทธิ์ในหนึ่งแถวของ page_acl
+/// </summary>
+/// <remarks>
+/// ⚠️ ไม่มี Group โดยเจตนา — เคยมีค่า Group = 1 อยู่ตรงนี้พร้อม CHECK constraint
+///    ที่ยอมรับ 'group' แต่ **ไม่มีตาราง groups/group_members อยู่จริงเลย** ค่านี้
+///    จึงเป็นสถานะที่ระบบไม่มีทางสร้างได้ และทำให้ resolver มี branch ตายค้างไว้
+///
+///    constraint ที่อนุญาตสถานะซึ่งผลิตไม่ได้คือ constraint ที่หลอกคนอ่านโค้ด
+///    ให้เชื่อว่าฟีเจอร์นั้นมีอยู่
+///
+///    ตอนทำ group จริงต้องเพิ่มสามอย่างพร้อมกัน: ตาราง groups + group_members,
+///    ค่านี้กลับมาเป็น Group, และแก้ CHECK ck_page_acls_subject_type
+///    (การ resolve สิทธิ์จะกลายเป็น multi-row + หา role สูงสุดในหน่วยความจำ
+///     ไม่ใช่ LIMIT 1 แบบตอนนี้ — ดู PLAN.md เรื่อง nearest-ancestor-wins)
+/// </remarks>
 public enum AclSubjectType
 {
     User = 0,
-    Group = 1,
     /// <summary>ทุกคนใน workspace (ยกเว้น guest)</summary>
     Workspace = 2
 }
@@ -79,7 +94,6 @@ public static class RoleNames
         new Dictionary<AclSubjectType, string>
         {
             [AclSubjectType.User] = "user",
-            [AclSubjectType.Group] = "group",
             [AclSubjectType.Workspace] = "workspace"
         };
 }

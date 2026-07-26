@@ -205,4 +205,65 @@ public class DocUpdateRepository(AppDbContext db, ILogger<DocUpdateRepository> l
 
         await db.SaveChangesAsync(ct);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ลิงก์ระหว่างหน้า (`@page` mention) — derived เหมือน projection
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public async Task<int> ReplacePageLinksAsync(
+        Guid sourcePageId, IReadOnlyList<Guid> targetPageIds, CancellationToken ct = default)
+    {
+        var workspaceId = db.CurrentWorkspaceId
+            ?? throw new InvalidOperationException("ไม่มี workspace context");
+
+        // ─────────────────────────────────────────────────────────────────
+        //  กรองเป้าหมายก่อนเขียน
+        //
+        //  ⚠️ ปล่อยให้ composite FK เป็นคนปฏิเสธไม่ได้ เพราะ FK violation จะทำให้
+        //     SaveChanges ทั้งก้อนล้ม แปลว่า mention หน้าที่เพิ่งถูกลบไปหนึ่งอัน
+        //     จะทำให้ projection ทั้งหน้าพัง รวมถึง title ที่ sidebar ใช้
+        //
+        //     FK ยังอยู่และยังเป็น backstop จริง — แต่ทางที่ถูกคือกรองก่อน
+        //     ให้ FK ได้ทำหน้าที่ดักบั๊ก ไม่ใช่ดักข้อมูลที่ผู้ใช้ป้อนตามปกติ
+        //
+        //     query นี้ผ่าน tenant filter อยู่แล้ว หน้าจาก workspace อื่นจึงหลุด
+        //     ตะแกรงนี้ไปไม่ได้
+        // ─────────────────────────────────────────────────────────────────
+        var wanted = targetPageIds.Where(id => id != sourcePageId).Distinct().ToList();
+
+        var valid = wanted.Count == 0
+            ? []
+            : await db.Pages.Where(p => wanted.Contains(p.Id)).Select(p => p.Id).ToListAsync(ct);
+
+        await db.PageLinks
+                .Where(l => l.SourcePageId == sourcePageId)
+                .ExecuteDeleteAsync(ct);
+
+        if (valid.Count > 0)
+        {
+            db.PageLinks.AddRange(valid.Select(targetId => new PageLink
+            {
+                WorkspaceId = workspaceId,
+                SourcePageId = sourcePageId,
+                TargetPageId = targetId,
+                UpdatedAt = DateTimeOffset.UtcNow
+            }));
+
+            await db.SaveChangesAsync(ct);
+        }
+
+        return valid.Count;
+    }
+
+    public async Task<IReadOnlyList<PageLinkSource>> GetBacklinksAsync(
+        Guid targetPageId, int limit, CancellationToken ct = default)
+        // join ผ่าน navigation ไม่ได้เพราะ PageLink ไม่มี navigation property
+        // (ตั้งใจ — ตารางนี้เป็น edge list ไม่ใช่ entity ที่มีพฤติกรรม)
+        => await db.PageLinks
+                   .Where(l => l.TargetPageId == targetPageId)
+                   .Join(db.Pages, l => l.SourcePageId, p => p.Id, (_, p) => p)
+                   .OrderByDescending(p => p.UpdatedAt)
+                   .Take(limit)
+                   .Select(p => new PageLinkSource(p.Id, p.Title, p.Icon, p.UpdatedAt))
+                   .ToListAsync(ct);
 }

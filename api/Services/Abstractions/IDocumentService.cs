@@ -16,6 +16,10 @@ public interface IDocumentService
 
     Task<Result> SaveProjectionAsync(
         Guid pageId, ProjectionRequest request, CancellationToken ct = default);
+
+    /// <summary>หน้าที่ลิงก์มาหาหน้านี้ — กรองตามสิทธิ์ของหน้าต้นทางแล้ว</summary>
+    Task<Result<IReadOnlyList<BacklinkDto>>> GetBacklinksAsync(
+        Guid pageId, CancellationToken ct = default);
 }
 
 /// <param name="Frames">ไบนารี [u32 count][u32 len][bytes]… frame 0 = snapshot</param>
