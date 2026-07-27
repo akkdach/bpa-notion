@@ -28,7 +28,26 @@ public interface IDocumentService
     /// คืน freshness มาด้วยเสมอ เพื่อให้ผู้เรียกแยก "หน้าว่าง" จาก "ยังไม่มีข้อมูล" ได้
     /// </summary>
     Task<Result<PageContentDto>> GetContentAsync(Guid pageId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ต่อท้ายย่อหน้าธรรมดาเข้าไปในเอกสาร — ทางเดียวที่เซิร์ฟเวอร์เขียนเนื้อหาได้
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ ย่อหน้าธรรมดาเท่านั้น ไม่มี heading / list / table / mark
+    ///    เหตุผลเต็มอยู่ที่ BlockNoteWriter — สรุปคือ schema ของ BlockNote นิยามใน
+    ///    TypeScript และเป็น 0.x การ clone มาเป็น C# ทั้งชุดไม่มีอะไรตรวจว่าตรงกัน
+    ///    ส่วนรูปร่างที่ผิดทำ "ข้อมูลหายจริง" ไม่ใช่แค่ render พลาด
+    ///
+    /// ⚠️ ต่อท้ายเสมอ ไม่มีทางแก้หรือลบของเดิม — เจตนา ไม่ใช่ข้อจำกัดชั่วคราว
+    ///    การให้เซิร์ฟเวอร์ลบเนื้อหาที่คนเขียนคือความสามารถที่ความเสี่ยงสูงกว่าประโยชน์
+    /// </remarks>
+    Task<Result<AppendParagraphsResult>> AppendParagraphsAsync(
+        Guid pageId, IReadOnlyList<string> paragraphs, CancellationToken ct = default);
 }
+
+/// <param name="Seq">ลำดับของ update ที่เขียนลง log</param>
+/// <param name="ParagraphCount">จำนวนย่อหน้าที่เพิ่มเข้าไป</param>
+public record AppendParagraphsResult(long Seq, int ParagraphCount);
 
 /// <param name="Frames">ไบนารี [u32 count][u32 len][bytes]… frame 0 = snapshot</param>
 public record DocumentBootstrap(

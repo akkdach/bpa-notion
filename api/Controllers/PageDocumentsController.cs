@@ -109,6 +109,25 @@ public class PageDocumentsController(IDocumentService documents) : ControllerBas
         => (await documents.GetContentAsync(pageId, ct)).ToActionResult();
 
     /// <summary>
+    /// ต่อท้ายย่อหน้าธรรมดาเข้าไปในเอกสาร — จุดเดียวที่เซิร์ฟเวอร์เขียน Yjs
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ ต่อท้ายเท่านั้น แก้หรือลบของเดิมไม่ได้ และรับเฉพาะย่อหน้าธรรมดา
+    ///    (ไม่มี heading / list / table / mark) — ดูเหตุผลเต็มที่ BlockNoteWriter
+    ///
+    /// ⚠️ เป็น POST ไม่ใช่ PUT โดยเจตนา — PUT สื่อว่าเขียนทับทั้งทรัพยากร ซึ่งเป็น
+    ///    สิ่งที่ endpoint นี้ตั้งใจ "ไม่" ทำ
+    /// </remarks>
+    [HttpPost("content/paragraphs")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> AppendParagraphs(
+        Guid pageId, AppendParagraphsRequest request, CancellationToken ct)
+        => (await documents.AppendParagraphsAsync(pageId, request.Paragraphs ?? [], ct))
+            .ToActionResult();
+
+    /// <summary>
     /// plain text ที่ client แกะจาก Y.Doc — ใช้ทำ index ค้นหาและ title ใน sidebar
     /// client ควรส่งหลังผู้ใช้หยุดพิมพ์สักครู่ ไม่ใช่ทุก keystroke
     /// </summary>

@@ -300,6 +300,12 @@ jobs:
       - name: verify-search (ค้นไทยกลางคำ + อ่านเนื้อหาหน้า)
         run: node scripts/verify-search.mjs "$API_BASE"
 
+      # ⚠️ จุดเดียวที่เซิร์ฟเวอร์เขียน Yjs — รูปร่างผิดทำข้อมูลหายจริง ไม่ใช่ render พลาด
+      #    เคสตัดสินคือ node.check() กับ schema จริงของ BlockNote
+      #    (yXmlFragmentToProseMirrorRootNode เองไม่ validate — พิสูจน์แล้ว)
+      - name: verify-blocknote-append (เขียนเนื้อหาแล้วโหลดกลับด้วย schema จริง)
+        run: node scripts/verify-blocknote-append.mjs "$API_BASE"
+
       # ⚠️ เคสสำคัญ: ลบถาวรหน้าที่มีประวัติแล้วประวัติต้องยังอยู่
       #    FK เป็น ON DELETE SET NULL (page_id) — ถ้าเป็น SET NULL เปล่า ๆ
       #    จะ null ทั้ง (workspace_id, page_id) แล้ว purge จะล้มทั้งคำสั่ง

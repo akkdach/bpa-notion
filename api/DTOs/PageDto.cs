@@ -129,3 +129,9 @@ public record PageContentDto(
     string Freshness,
     DateTimeOffset PageUpdatedAt,
     DateTimeOffset? ProjectionUpdatedAt);
+
+/// <param name="Paragraphs">
+/// ข้อความ ย่อหน้าละหนึ่งรายการ — ขึ้นบรรทัดในตัวจะถูกแตกเป็นคนละย่อหน้าให้
+/// (BlockNote ไม่มีโครงรองรับ newline ภายในย่อหน้าเดียว)
+/// </param>
+public record AppendParagraphsRequest(IReadOnlyList<string>? Paragraphs);

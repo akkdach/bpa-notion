@@ -188,8 +188,8 @@ try {
   //  ทุก session ในโฟลเดอร์นี้ตลอดไป และ tool คล้ายกันหลายตัวทำให้โมเดล
   //  เลือกผิดบ่อยขึ้น เทสจึงล็อกทั้งสองด้าน ไม่ใช่แค่ด้าน "มีครบ"
   // ═════════════════════════════════════════════════════════════════════
-  const expected = ['add_note', 'create_page', 'delete_page', 'find_pages', 'get_page',
-                    'restore_page', 'update_page']
+  const expected = ['add_note', 'append_content', 'create_page', 'delete_page', 'find_pages',
+                    'get_page', 'restore_page', 'update_page']
   for (const name of expected) {
     check(`มี tool ${name}`, names.includes(name), `ที่เจอ: ${names.join(', ')}`)
   }
@@ -303,6 +303,18 @@ try {
   const emptyNote = await callTool('add_note', { pageId: taskId, body: '   ' })
   check('บันทึกว่างเปล่า → ข้อความบอกเหตุผล ไม่ใช่ crash',
     emptyNote.text.includes('ว่างเปล่า'), emptyNote.text)
+
+  // ─── เขียนเนื้อหาในหน้าจริง ─────────────────────────────────────────────
+  const appended = await callTool('append_content', {
+    pageId: taskId, paragraphs: ['ย่อหน้าที่ AI เขียนลงเนื้อหาหน้า'],
+  })
+  check('append_content เขียนเนื้อหาลงหน้าได้',
+    !appended.isError && appended.text.includes('ต่อท้ายเนื้อหาหน้าแล้ว'),
+    appended.text || JSON.stringify(appended.error))
+
+  const readAfter = await callTool('get_page', { pageId: taskId })
+  check('get_page อ่านเนื้อหาที่เพิ่งเขียนกลับมาได้',
+    readAfter.text.includes('ย่อหน้าที่ AI เขียนลงเนื้อหาหน้า'), readAfter.text)
 
   // ─── ย้าย / ลบ / กู้คืน ──────────────────────────────────────────────────
   console.log(`\n${C.yellow}── จัดการโครงสร้าง ──${C.off}`)

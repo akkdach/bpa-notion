@@ -379,6 +379,25 @@ public static class TaskTools
         return $"เขียนบันทึกแล้วเมื่อ {note.CreatedAt:yyyy-MM-dd HH:mm}  หน้า id={pageId}";
     });
 
+    [McpServerTool(Name = "append_content")]
+    [Description("ต่อท้ายย่อหน้าเข้าไปใน \"เนื้อหาของหน้า\" จริง ๆ (ต่างจาก add_note ที่เขียน " +
+                 "เป็นบันทึกแยกใต้เอกสาร). รับได้เฉพาะย่อหน้าธรรมดา — ไม่มีหัวข้อ รายการ ตาราง " +
+                 "หรือตัวหนา/เอียง. ต่อท้ายอย่างเดียว แก้หรือลบของเดิมไม่ได้")]
+    public static Task<string> AppendContent(
+        PmClient client,
+        [Description("id ของหน้า")] Guid pageId,
+        [Description("ข้อความ ย่อหน้าละหนึ่งรายการ (ไม่เกิน 50 ย่อหน้าต่อครั้ง)")] string[] paragraphs,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        if (paragraphs.Length == 0)
+            return "ไม่มีย่อหน้าให้เขียน — ระบุอย่างน้อยหนึ่งย่อหน้า";
+
+        var result = await client.AppendParagraphsAsync(pageId, paragraphs, ct);
+
+        return $"เขียน {result.ParagraphCount} ย่อหน้าต่อท้ายเนื้อหาหน้าแล้ว  id={pageId}\n" +
+               "(ผู้ใช้จะเห็นในเอกสารทันทีที่เปิดหน้านั้น)";
+    });
+
     [McpServerTool(Name = "restore_page")]
     [Description("กู้คืนหน้าจากถังขยะพร้อมลูกหลาน. " +
                  "ถ้าหน้าแม่ยังอยู่ในถังขยะจะกู้ไม่ได้ — ต้องกู้หน้าแม่ก่อน")]

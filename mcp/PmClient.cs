@@ -285,4 +285,10 @@ public sealed class PmClient(IConfiguration configuration)
     public Task<PageNote> AddNoteAsync(Guid pageId, string body, CancellationToken ct)
         => SendAsync<PageNote>(HttpMethod.Post, $"/api/v1/pages/{pageId}/notes",
             new { body }, ct);
+
+    /// <summary>ต่อท้ายย่อหน้าเข้าไปในเนื้อหาหน้าจริง (ไม่ใช่บันทึก)</summary>
+    public Task<AppendResult> AppendParagraphsAsync(
+        Guid pageId, IReadOnlyList<string> paragraphs, CancellationToken ct)
+        => SendAsync<AppendResult>(HttpMethod.Post,
+            $"/api/v1/pages/{pageId}/content/paragraphs", new { paragraphs }, ct);
 }

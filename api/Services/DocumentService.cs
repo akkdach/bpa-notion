@@ -40,6 +40,14 @@ public class DocumentService(
     /// </summary>
     private const int BacklinkLimit = 50;
 
+    /// <summary>
+    /// เพดานย่อหน้าต่อการเรียกหนึ่งครั้ง
+    ///
+    /// การเขียนทีละมาก ๆ ทำให้ update ก้อนเดียวใหญ่ และถ้ารูปร่างผิดก็เสียหายกว้าง
+    /// AI ที่อยากเขียนยาวกว่านี้ควรเรียกซ้ำ — ระหว่างนั้นมีจังหวะให้เห็นผลก่อน
+    /// </summary>
+    private const int MaxParagraphsPerCall = 50;
+
     public async Task<Result<DocumentBootstrap>> GetBootstrapAsync(
         Guid pageId, CancellationToken ct = default)
     {
@@ -299,6 +307,102 @@ public class DocumentService(
             ContentFreshness.FromDocument,
             page.UpdatedAt,
             projection.UpdatedAt);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  เขียนย่อหน้าต่อท้ายเอกสาร — จุดเดียวที่เซิร์ฟเวอร์เขียน Yjs
+    // ═══════════════════════════════════════════════════════════════════════
+    public async Task<Result<AppendParagraphsResult>> AppendParagraphsAsync(
+        Guid pageId, IReadOnlyList<string> paragraphs, CancellationToken ct = default)
+    {
+        var cleaned = paragraphs
+            .Select(p => (p ?? string.Empty).ReplaceLineEndings("\n").Trim())
+            .Where(p => p.Length > 0)
+            .ToList();
+
+        if (cleaned.Count == 0)
+            return Error.Validation("ไม่มีย่อหน้าให้เขียน", "no_paragraphs");
+
+        if (cleaned.Count > MaxParagraphsPerCall)
+        {
+            return Error.Validation(
+                $"เขียนได้ครั้งละไม่เกิน {MaxParagraphsPerCall} ย่อหน้า", "too_many_paragraphs");
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ⚠️ ย่อหน้าที่มีขึ้นบรรทัดในตัวจะกลายเป็น "ย่อหน้าเดียวที่มี \n อยู่ข้างใน"
+        //     ซึ่ง BlockNote ไม่มีโครงรองรับ — ProseMirror text node ไม่เก็บ newline
+        //     เป็นอย่างอื่นนอกจากตัวอักษร ผลคือมันจะแสดงติดกันหมด
+        //
+        //     แตกให้เป็นคนละย่อหน้าเสียตรงนี้ ดีกว่าปล่อยให้ผู้เรียกเดาเอง
+        // ─────────────────────────────────────────────────────────────────
+        var expanded = cleaned
+            .SelectMany(p => p.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            .Select(p => p.Trim())
+            .Where(p => p.Length > 0)
+            .ToList();
+
+        var role = await permissions.GetEffectiveRoleAsync(pageId, ct);
+        if (role is null) return PageNotFound;
+        if (!role.Value.CanEdit()) return NoEditPermission;
+
+        var page = await pages.GetAsync(pageId, ct);
+        if (page is null) return PageNotFound;
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ประกอบเอกสารปัจจุบันแล้วสร้าง "ส่วนต่าง"
+        //
+        //  ต้องอ่านสถานะจริงก่อน ไม่ใช่เขียนทับ — เพื่อให้ update ที่ได้รวมกับ
+        //  สิ่งที่ client อื่นเขียนพร้อมกันได้ตามปกติของ CRDT
+        // ─────────────────────────────────────────────────────────────────
+        var state = await documents.ReadStateAsync(pageId, ct);
+
+        var existing = new List<byte[]>(state.Updates.Count + 1);
+        if (state.Snapshot is { Length: > 0 }) existing.Add(state.Snapshot);
+        existing.AddRange(state.Updates);
+
+        AppendUpdate written;
+        try
+        {
+            written = BlockNoteWriter.BuildAppendUpdate(existing, expanded);
+        }
+        catch (Exception ex)
+        {
+            // YDotNet เป็น binding ของ native library — ความผิดพลาดที่นี่ไม่ใช่
+            // input ที่ผิด แต่เป็นบั๊กของเราหรือของ library จึง log ให้เห็นชัด
+            logger.LogError(ex, "สร้าง Yjs update ไม่สำเร็จสำหรับหน้า {PageId}", pageId);
+            return Error.Unavailable("เขียนเนื้อหาไม่สำเร็จ", "yjs_write_failed");
+        }
+
+        if (written.Bytes.Length == 0)
+            return Error.Unavailable("สร้าง update ได้เป็นค่าว่าง", "yjs_write_empty");
+
+        var appended = await AppendUpdateAsync(
+            pageId, written.Bytes, unchecked((long)written.ClientId), ct);
+        if (appended.IsFailure) return appended.Error;
+
+        // ─────────────────────────────────────────────────────────────────
+        //  อัปเดต projection ให้ค้นเจอทันที
+        //
+        //  ถ้าไม่ทำ ข้อความที่เพิ่งเขียนจะค้นไม่เจอจนกว่าจะมีคนเปิดหน้านั้นใน
+        //  เบราว์เซอร์ — ปัญหาเดียวกับที่ page_searches ไม่ถูก seed ตอนสร้างหน้า
+        //
+        //  เบราว์เซอร์จะเขียนทับด้วยฉบับที่แกะจาก Y.Doc จริงในภายหลัง ซึ่งถูกต้อง
+        //  กว่าเสมอ ที่นี่แค่ทำให้ช่วงเวลาระหว่างนั้นไม่ตาบอด
+        // ─────────────────────────────────────────────────────────────────
+        var projection = await documents.GetSearchProjectionAsync(pageId, ct);
+        var body = projection?.BodyText ?? string.Empty;
+        var addition = string.Join("\n", expanded);
+
+        await documents.UpsertSearchProjectionAsync(
+            pageId, page.AccessRootId, page.Title,
+            Truncate(body.Length > 0 ? $"{body}\n{addition}" : addition), ct);
+
+        logger.LogInformation(
+            "เขียน {Count} ย่อหน้าลงหน้า {PageId} (seq {Seq})",
+            expanded.Count, pageId, appended.Value.Seq);
+
+        return new AppendParagraphsResult(appended.Value.Seq, expanded.Count);
     }
 
     public async Task<Result<IReadOnlyList<BacklinkDto>>> GetBacklinksAsync(

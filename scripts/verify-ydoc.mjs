@@ -11,6 +11,14 @@
 //    → แกะ frame → applyUpdate ใส่ Y.Doc ใหม่ → ข้อความต้องเหมือนเดิม
 //
 //  ⚠️ ใช้ yjs จาก web/node_modules — ตัวเดียวกับที่ฝั่ง client จะใช้จริง
+//
+//  ⚠️ เคสส่วนใหญ่ในไฟล์นี้ใช้ doc.getText('content') ซึ่งเป็น "คนละ root type"
+//     กับที่แอปเก็บจริง (doc.getXmlFragment('blocknote') — ดู PageEditor.tsx)
+//     มันยังมีค่าเพราะพิสูจน์ commutativity / idempotence / การ prune ซึ่งไม่ขึ้น
+//     กับชนิดของ type แต่ "ไม่" พิสูจน์ว่ารูปร่างที่แอปใช้จริงรอด
+//
+//     หัวข้อสุดท้ายจึงเพิ่มเคสที่ใช้ XmlFragment ของจริง ส่วนการตรวจว่ารูปร่างนั้น
+//     ตรงกับ schema ของ BlockNote อยู่ใน verify-blocknote-append.mjs
 // ═══════════════════════════════════════════════════════════════════════════
 import { createRequire } from 'node:module'
 
@@ -343,6 +351,60 @@ const afterIntrusion = readText(rebuild(parseFrames(stillThere.bytes)))
 check('เนื้อหาไม่ถูกแตะต้องเลยหลังคนนอกพยายามเขียนทั้งสามทาง',
   afterIntrusion === beforeIntrusion,
   `ก่อน "${beforeIntrusion.slice(0, 50)}" หลัง "${afterIntrusion.slice(0, 50)}"`)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⚠️ รูปร่างที่แอปเก็บจริงคือ XmlFragment ไม่ใช่ Text
+//
+//  ทุกเคสข้างบนใช้ doc.getText('content') ซึ่งเป็น "คนละ root type" กับที่
+//  PageEditor.tsx ใช้ (doc.getXmlFragment('blocknote')) แปลว่า pipeline ที่
+//  พิสูจน์มาทั้งหมดพิสูจน์แค่ Y.Text แบน ๆ — commutativity/idempotence ของ
+//  Yjs ไม่ขึ้นกับชนิดก็จริง แต่ "การเก็บและเสิร์ฟรูปร่างที่แอปใช้จริง" ไม่เคยถูกตรวจ
+//
+//  เคสข้างล่างปิดช่องนั้น ส่วนการตรวจว่ารูปร่างตรงกับ schema ของ BlockNote
+//  อยู่ใน verify-blocknote-append.mjs (ต้องใช้ schema จริงจึงแยกไฟล์)
+// ═══════════════════════════════════════════════════════════════════════════
+console.log(`\n${C.yellow}── รูปร่างจริงที่แอปใช้ (XmlFragment) ──${C.off}`)
+
+const shapePage = (await call('POST', '/pages', {
+  ...ctx, body: { parentId: null, title: 'หน้าทดสอบรูปร่าง XmlFragment' },
+})).body?.data
+
+const shapeDoc = new Y.Doc()
+const shapeFragment = shapeDoc.getXmlFragment('blocknote')
+const group = new Y.XmlElement('blockGroup')
+const container = new Y.XmlElement('blockContainer')
+container.setAttribute('id', 'ทดสอบ-0001')
+const paragraph = new Y.XmlElement('paragraph')
+const xmlText = new Y.XmlText()
+xmlText.insert(0, 'ข้อความไทยในรูปร่างจริงของ BlockNote')
+paragraph.insert(0, [xmlText])
+container.insert(0, [paragraph])
+group.insert(0, [container])
+shapeFragment.insert(0, [group])
+
+const shapeUpdate = Y.encodeStateAsUpdate(shapeDoc)
+const sent = await call('POST', `/pages/${shapePage.id}/ydoc/update`, {
+  ...ctx, binary: shapeUpdate,
+})
+check('ส่ง update ที่เป็น XmlFragment ขึ้นเซิร์ฟเวอร์ได้', sent.status === 200,
+  `ได้ ${sent.status}`)
+
+const shapeBack = await call('GET', `/pages/${shapePage.id}/ydoc`, { ...ctx, raw: true })
+const restored = rebuild(parseFrames(shapeBack.bytes))
+const restoredFragment = restored.getXmlFragment('blocknote')
+
+check('ประกอบกลับมาแล้วยังเป็น blockGroup เดียวที่ระดับบนสุด',
+  restoredFragment.length === 1
+  && restoredFragment.get(0)?.nodeName?.toLowerCase() === 'blockgroup',
+  `length=${restoredFragment.length} first=${restoredFragment.get(0)?.nodeName}`)
+
+check('ข้อความไทยในรูปร่าง XmlFragment กลับมาครบทุกไบต์',
+  restoredFragment.toString().includes('ข้อความไทยในรูปร่างจริงของ BlockNote'),
+  restoredFragment.toString().slice(0, 160))
+
+check('attribute id ของ blockContainer ไม่หาย',
+  restoredFragment.toString().includes('ทดสอบ-0001'),
+  restoredFragment.toString().slice(0, 160))
 
 console.log(`\nผ่าน ${C.green}${passed}${C.off} / ไม่ผ่าน ${failed > 0 ? C.red : C.dim}${failed}${C.off}\n`)
 process.exit(failed > 0 ? 1 : 0)

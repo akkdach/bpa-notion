@@ -70,6 +70,9 @@ public sealed record PageNote(
     string Body,
     DateTimeOffset CreatedAt);
 
+/// <summary>ผลการเขียนเนื้อหา — ผลของ POST /api/v1/pages/{id}/content/paragraphs</summary>
+public sealed record AppendResult(long Seq, int ParagraphCount);
+
 /// <summary>ผลค้นหา — ผลของ GET /api/v1/search</summary>
 public sealed record SearchResult(
     string Query,
