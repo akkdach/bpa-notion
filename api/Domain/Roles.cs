@@ -60,6 +60,25 @@ public enum AclSubjectType
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  ประเภทของบัญชี
+//
+//  มีอยู่เพื่อให้ "เจ้าของตรวจงานได้" เป็นไปได้จริง — ถ้า AI ใช้บัญชีเดียวกับคน
+//  last_edited_by จะเป็นค่าเดียวกันทั้งคู่ แล้วคำถามว่า "อันนี้ฉันแก้เองหรือ AI แก้"
+//  ตอบไม่ได้เลย ซึ่งทำให้ประวัติการแก้ไขไม่มีประโยชน์
+//
+//  ⚠️ ไม่ใช่ระดับสิทธิ์ — agent ได้สิทธิ์จาก workspace_members เหมือนคนทุกอย่าง
+//     คอลัมน์นี้บอกแค่ "ใครเป็นคนทำ" ไม่ได้บอกว่า "ทำอะไรได้"
+//     อยากจำกัดขอบเขตของ AI ให้ใช้ role กับ page_acl ไม่ใช่ค่านี้
+// ═══════════════════════════════════════════════════════════════════════════
+public enum UserKind
+{
+    Human = 0,
+
+    /// <summary>บัญชีที่ AI ใช้ผ่าน MCP server — ดู scripts/setup-mcp.ps1</summary>
+    Agent = 1
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  ค่า string ที่ใช้ใน DB — ต้องตรงกับ check constraint ใน migration
 // ═══════════════════════════════════════════════════════════════════════════
 public static class RoleNames
@@ -96,6 +115,13 @@ public static class RoleNames
             [AclSubjectType.User] = "user",
             [AclSubjectType.Workspace] = "workspace"
         };
+
+    public static readonly IReadOnlyDictionary<UserKind, string> Kinds =
+        new Dictionary<UserKind, string>
+        {
+            [UserKind.Human] = "human",
+            [UserKind.Agent] = "agent"
+        };
 }
 
 public static class RoleExtensions
@@ -104,6 +130,7 @@ public static class RoleExtensions
     public static string ToDbValue(this PageRole role) => RoleNames.Page[role];
     public static string ToDbValue(this PageKind kind) => RoleNames.Kind[kind];
     public static string ToDbValue(this AclSubjectType type) => RoleNames.SubjectType[type];
+    public static string ToDbValue(this UserKind kind) => RoleNames.Kinds[kind];
 
     /// <summary>
     /// owner/admin ของ workspace มีสิทธิ์ full ทุกหน้าโดยไม่ต้องดู page_acl

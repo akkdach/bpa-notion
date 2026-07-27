@@ -125,9 +125,21 @@ export function MemberSettings({
             return (
               <li key={member.userId} className="flex items-center gap-3 p-3">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {member.name}
-                    {isSelf && <span className="ml-2 text-xs text-muted-foreground">(คุณ)</span>}
+                  <p className="flex items-center gap-2 truncate text-sm font-medium">
+                    <span className="truncate">{member.name}</span>
+
+                    {/* บอกให้ชัดว่าอันไหนคือบัญชีของ AI — ทั้งหน้านี้และฟีดกิจกรรม
+                        พึ่งค่านี้ในการแยกงานที่ AI ทำออกจากงานที่คนทำ */}
+                    {member.kind === 'agent' && (
+                      <span
+                        className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-xs font-normal text-muted-foreground"
+                        title="บัญชีที่ AI ใช้ผ่าน MCP — ได้สิทธิ์เท่าที่ role กำหนด ไม่มีสิทธิ์พิเศษ"
+                      >
+                        🤖 AI
+                      </span>
+                    )}
+
+                    {isSelf && <span className="shrink-0 text-xs text-muted-foreground">(คุณ)</span>}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">{member.email}</p>
                 </div>

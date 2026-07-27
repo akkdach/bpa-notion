@@ -41,12 +41,21 @@ export interface UpdateWorkspaceInput {
   icon?: string
 }
 
+/**
+ * คนหรือ AI — ตรงกับ users.kind ฝั่ง API
+ *
+ * ไม่ใช่ระดับสิทธิ์: agent ได้สิทธิ์จาก role เหมือนคนทุกอย่าง ค่านี้บอกแค่ว่า
+ * "ใครเป็นคนทำ" เพื่อให้เจ้าของแยกงานที่ AI แก้ออกจากงานที่ตัวเองแก้ได้
+ */
+export type UserKind = 'human' | 'agent'
+
 export interface Member {
   userId: string
   email: string
   name: string
   avatarUrl?: string
   role: WorkspaceRole
+  kind: UserKind
   joinedAt: string
 }
 

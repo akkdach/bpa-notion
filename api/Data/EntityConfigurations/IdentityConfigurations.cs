@@ -26,6 +26,15 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Name).IsRequired().HasMaxLength(200);
         builder.Property(u => u.AvatarUrl).HasMaxLength(1000);
         builder.Property(u => u.Locale).IsRequired().HasMaxLength(10).HasDefaultValue("th");
+
+        // default ที่ระดับฐานด้วย ไม่ใช่แค่ใน C# — บัญชีที่ถูก INSERT จาก raw SQL
+        // หรือ psql มือเปล่าต้องได้ 'human' ไม่ใช่ NULL
+        builder.Property(u => u.Kind)
+               .HasConversion(RoleConverters.UserKind)
+               .IsRequired()
+               .HasMaxLength(20)
+               .HasDefaultValue(Domain.UserKind.Human);
+
         builder.Property(u => u.CreatedAt).HasDefaultValueSql("now()");
     }
 }

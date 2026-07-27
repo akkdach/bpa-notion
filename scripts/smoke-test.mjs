@@ -391,6 +391,57 @@ async function main() {
   check('ถอด owner คนสุดท้ายไม่ได้ → 409', removeLastOwner.status === 409,
     `ได้ ${removeLastOwner.status}`)
 
+  // ═══════════════════════════════════════════════════════════════════════
+  section('บัญชีของ AI (users.kind)')
+  // ═══════════════════════════════════════════════════════════════════════
+  //  แยก "บัญชีของคน" ออกจาก "บัญชีที่ AI ใช้" เพื่อให้ตอบได้ว่าหน้านี้ใครแก้
+  //  ก่อนหน้านี้ MCP ใช้บัญชีเดียวกับเจ้าของ → last_edited_by เป็นค่าเดียวกัน
+  //  ทั้งสองกรณี แล้วคำถามนั้นตอบไม่ได้เลย
+  // ═══════════════════════════════════════════════════════════════════════
+  check('บัญชีที่สมัครใหม่เป็น human', owner.user.kind === 'human',
+    `ได้ ${JSON.stringify(owner.user.kind)}`)
+
+  // ⚠️ ข้อสำคัญด้านความถูกต้อง: ห้ามประกาศตัวเองเป็น agent ตอนสมัคร
+  //    ถ้าทำได้ คนก็ปลอมให้การแก้ของตัวเองดูเหมือน AI ทำ (หรือกลับกัน) ได้
+  //    ซึ่งทำลายจุดประสงค์ของคอลัมน์นี้ทั้งหมด
+  const selfDeclared = await call('POST', '/auth/register', {
+    body: {
+      email: `ปลอมเป็นบอท.${stamp}@ทดสอบ.local`,
+      password: account.password,
+      name: 'อ้างว่าเป็นบอท',
+      kind: 'agent',
+    },
+  })
+  check('ประกาศตัวเองเป็น agent ตอนสมัครไม่ได้ — ยังเป็น human',
+    selfDeclared.body?.data?.user?.kind === 'human',
+    `ได้ ${JSON.stringify(selfDeclared.body?.data?.user?.kind)}`)
+
+  const markAgent = await call('PATCH', `/workspaces/current/members/${intruderAuth.user.id}`, {
+    ...asOwner, body: { role: 'member', kind: 'agent' },
+  })
+  check('owner ตั้งสมาชิกเป็น agent ได้', markAgent.status === 200,
+    `ได้ ${markAgent.status} ${JSON.stringify(markAgent.body)}`)
+
+  const withKinds = await call('GET', '/workspaces/current/members', asOwner)
+  check('รายชื่อสมาชิกบอกได้ว่าใครเป็น agent',
+    withKinds.body?.data?.find((m) => m.userId === intruderAuth.user.id)?.kind === 'agent',
+    JSON.stringify(withKinds.body?.data?.map((m) => ({ role: m.role, kind: m.kind }))))
+  check('คนอื่นยังเป็น human อยู่',
+    withKinds.body?.data?.find((m) => m.userId === owner.user.id)?.kind === 'human')
+
+  const badKind = await call('PATCH', `/workspaces/current/members/${intruderAuth.user.id}`, {
+    ...asOwner, body: { role: 'member', kind: 'หุ่นยนต์' },
+  })
+  check('kind ที่ไม่รู้จัก → 400 พร้อมบอกค่าที่ถูก',
+    badKind.status === 400 && badKind.body?.code === 'invalid_user_kind'
+      && badKind.body?.message?.includes('agent'),
+    `ได้ ${badKind.status} ${badKind.body?.message}`)
+
+  // คืนค่าเป็น human ก่อน เพราะเคสถัดไปใช้บัญชีนี้เป็นสมาชิกธรรมดาต่อ
+  await call('PATCH', `/workspaces/current/members/${intruderAuth.user.id}`, {
+    ...asOwner, body: { role: 'admin', kind: 'human' },
+  })
+
   // ─── ออกเอง ─────────────────────────────────────────────────────────────
   const leave = await call('DELETE', `/workspaces/current/members/${intruderAuth.user.id}`, {
     token: intruderToken, workspaceId: ws.id,

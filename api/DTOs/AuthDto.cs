@@ -19,12 +19,14 @@ public record AuthResponse(
     UserDto User,
     IReadOnlyList<WorkspaceSummaryDto> Workspaces);
 
+/// <param name="Kind">"human" หรือ "agent" — ใช้แยกงานที่ AI ทำออกจากงานที่คนทำ</param>
 public record UserDto(
     Guid Id,
     string Email,
     string Name,
     string? AvatarUrl,
-    string Locale);
+    string Locale,
+    string Kind);
 
 public record WorkspaceSummaryDto(
     Guid Id,

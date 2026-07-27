@@ -5,7 +5,15 @@
 #
 #  ทำสองอย่าง:
 #    1. build mcp/ เป็น Release (.mcp.json ชี้ไปที่ .dll ตัวนั้น)
-#    2. ถามอีเมล/รหัสผ่านของบัญชีในแอป แล้วเก็บลง .NET Secret Manager
+#    2. สร้าง "บัญชีของ AI" แยกจากบัญชีคุณ เชิญเข้า workspace เป็น member
+#       ทำเครื่องหมายว่าเป็น agent แล้วเก็บ credential ลง .NET Secret Manager
+#
+#  ⚠️ ของเดิมให้ AI ใช้บัญชีเดียวกับเจ้าของ ซึ่งทำให้ last_edited_by เป็นค่าเดียวกัน
+#     ทั้งตอนคนแก้และตอน AI แก้ — คำถามว่า "อันนี้ใครแก้" จึงตอบไม่ได้เลย
+#     และนั่นทำให้เป้าหมาย "เจ้าของตรวจงานที่ AI ทำได้" เป็นไปไม่ได้ตั้งแต่ต้น
+#
+#  รหัสผ่านของบัญชี AI ถูกสุ่มและไม่แสดงที่ไหน — ไม่มีใครต้องพิมพ์มันเอง
+#  มันอยู่ใน Secret Manager ที่เดียว
 #
 #  ทำไมไม่ใส่ credential ใน .mcp.json: ไฟล์นั้นขึ้น git ส่วน Secret Manager
 #  เก็บที่ %APPDATA%\Microsoft\UserSecrets\<id>\secrets.json ซึ่งอยู่นอก repo
@@ -38,8 +46,14 @@ if (-not (Test-Path $dll)) { Write-Error "build ผ่านแต่ไม่�
 
 # ─── 2. credential ────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host 'บัญชีที่ MCP จะใช้ login เข้าแอป' -ForegroundColor Cyan
-Write-Host '(ใช้บัญชีเดียวกับที่คุณเข้าเว็บ — AI จะเห็นและแก้ได้เท่าที่บัญชีนี้เห็นและแก้ได้)'
+Write-Host 'บัญชีที่ AI จะใช้' -ForegroundColor Cyan
+Write-Host 'สคริปต์จะสร้าง "บัญชีของ AI" แยกจากบัญชีคุณ แล้วเชิญเข้า workspace เป็น member'
+Write-Host ''
+Write-Host 'ทำไมต้องแยกบัญชี: ถ้า AI ใช้บัญชีเดียวกับคุณ last_edited_by จะเป็นค่าเดียวกัน' -ForegroundColor DarkGray
+Write-Host 'ทั้งสองกรณี แล้วคำถามว่า "อันนี้ฉันแก้เองหรือ AI แก้" จะตอบไม่ได้เลย' -ForegroundColor DarkGray
+Write-Host ''
+Write-Host 'ทำไมเป็น member ไม่ใช่ guest: guest สร้างหน้าระดับบนสุดไม่ได้ AI จะเจอ' -ForegroundColor DarkGray
+Write-Host 'Forbidden แล้วลองซ้ำไม่จบ — อยากจำกัดขอบเขตให้ใช้สิทธิ์ระดับหน้า (page ACL)' -ForegroundColor DarkGray
 Write-Host ''
 
 $existing = @{}
@@ -73,17 +87,183 @@ function Read-Setting {
     return $value
 }
 
-$email    = Read-Setting -Key 'Pm:Email'     -Prompt 'อีเมล'
-$password = Read-Setting -Key 'Pm:Password'  -Prompt 'รหัสผ่าน' -Secret
-$apiUrl   = Read-Setting -Key 'Pm:ApiUrl'    -Prompt 'URL ของ API' -Default 'http://localhost:5081'
-$workspace = Read-Host 'workspace (slug หรือ GUID — Enter เพื่อข้ามถ้ามี workspace เดียว)'
+$apiUrl = Read-Setting -Key 'Pm:ApiUrl' -Prompt 'URL ของ API' -Default 'http://localhost:5081'
+$apiUrl = $apiUrl.TrimEnd('/')
+$api = "$apiUrl/api/v1"
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ตัวช่วยเรียก REST
+#
+#  ⚠️ ต้องระบุ charset=utf-8 ให้ชัด — เนื้อหาทั้งระบบเป็นภาษาไทย ถ้าไม่ระบุ
+#     PowerShell บางรุ่นส่งเป็น ISO-8859-1 แล้วชื่อไทยจะเพี้ยนตั้งแต่ตอนสมัคร
+#
+#  คืน hashtable { ok, data, code, message } แทนการ throw เพราะ 409 (อีเมลถูกใช้
+#  แล้ว) เป็นผลลัพธ์ที่คาดไว้ ไม่ใช่ความผิดพลาด
+# ═══════════════════════════════════════════════════════════════════════════
+function Invoke-Api {
+    param(
+        [string]$Method,
+        [string]$Path,
+        [hashtable]$Body,
+        [string]$Token,
+        [string]$WorkspaceId
+    )
+
+    $headers = @{}
+    if ($Token) { $headers['Authorization'] = "Bearer $Token" }
+    if ($WorkspaceId) { $headers['X-Workspace-Id'] = $WorkspaceId }
+
+    # ห้ามตั้งชื่อ $args — มันเป็นตัวแปรอัตโนมัติของ PowerShell การประกาศทับ
+    # ในฟังก์ชันทำได้แต่ทำให้อ่านยากและเป็นบ่อเกิดของบั๊กที่หาสาเหตุนาน
+    $params = @{
+        Method      = $Method
+        Uri         = "$api$Path"
+        Headers     = $headers
+        ContentType = 'application/json; charset=utf-8'
+        ErrorAction = 'Stop'
+    }
+    if ($Body) { $params['Body'] = ($Body | ConvertTo-Json -Compress -Depth 5) }
+
+    try {
+        $response = Invoke-RestMethod @params
+        return @{ ok = $true; data = $response.data }
+    } catch {
+        $detail = $null
+        if ($_.ErrorDetails.Message) {
+            $detail = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+        }
+        return @{
+            ok      = $false
+            code    = $detail.code
+            message = if ($detail.message) { $detail.message } else { $_.Exception.Message }
+        }
+    }
+}
+
+# ─── 2a. login ด้วยบัญชี "ของคุณ" เพื่อขอสิทธิ์เชิญสมาชิก ──────────────────
+Write-Host 'ขั้นแรก: เข้าสู่ระบบด้วยบัญชีของคุณเอง (ต้องเป็น owner หรือ admin)' -ForegroundColor Cyan
+
+$ownerEmail = Read-Host 'อีเมลของคุณ'
+$ownerSecure = Read-Host 'รหัสผ่านของคุณ' -AsSecureString
+$ownerPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ownerSecure))
+
+$login = Invoke-Api -Method Post -Path '/auth/login' -Body @{
+    email = $ownerEmail; password = $ownerPassword
+}
+if (-not $login.ok) {
+    Write-Error "เข้าสู่ระบบไม่สำเร็จ: $($login.message)`nตรวจว่า API รันอยู่ที่ $apiUrl แล้วหรือยัง"
+}
+
+$ownerToken = $login.data.accessToken
+$ownerWorkspaces = @($login.data.workspaces)
+
+if ($ownerWorkspaces.Count -eq 0) {
+    Write-Error 'บัญชีนี้ยังไม่มี workspace — สร้างบนเว็บก่อนแล้วรันสคริปต์นี้อีกครั้ง'
+}
+
+# ─── 2b. เลือก workspace ที่ AI จะเข้าถึง ──────────────────────────────────
+if ($ownerWorkspaces.Count -eq 1) {
+    $target = $ownerWorkspaces[0]
+    Write-Host "ใช้ workspace: $($target.name) ($($target.slug))" -ForegroundColor Green
+} else {
+    Write-Host ''
+    Write-Host 'เลือก workspace ที่ AI จะเข้าถึง:' -ForegroundColor Cyan
+    for ($i = 0; $i -lt $ownerWorkspaces.Count; $i++) {
+        $w = $ownerWorkspaces[$i]
+        Write-Host ("  [{0}] {1}  ({2})  สิทธิ์ของคุณ: {3}" -f ($i + 1), $w.name, $w.slug, $w.role)
+    }
+    $choice = Read-Host "หมายเลข (1-$($ownerWorkspaces.Count))"
+    $index = 0
+    if (-not [int]::TryParse($choice, [ref]$index) -or $index -lt 1 -or $index -gt $ownerWorkspaces.Count) {
+        Write-Error "หมายเลขไม่ถูกต้อง: '$choice'"
+    }
+    $target = $ownerWorkspaces[$index - 1]
+}
+
+if ($target.role -notin @('owner', 'admin')) {
+    Write-Error "ต้องเป็น owner หรือ admin ของ '$($target.name)' จึงจะเชิญสมาชิกได้ (คุณเป็น $($target.role))"
+}
+
+# ─── 2c. สร้างบัญชีของ AI ──────────────────────────────────────────────────
+# อีเมลผูกกับ slug เพื่อให้หลาย workspace มีบอทของตัวเองแยกกันได้
+$agentEmail = "claude+$($target.slug)@$($target.slug).local"
+$agentName = 'Claude (AI)'
+
+Write-Host ''
+Write-Host "บัญชีของ AI: $agentEmail" -ForegroundColor Cyan
+
+# รหัสผ่านสุ่ม — ไม่มีใครต้องพิมพ์มันเอง มันอยู่ใน User Secrets เท่านั้น
+$agentPassword = [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+
+$register = Invoke-Api -Method Post -Path '/auth/register' -Body @{
+    email = $agentEmail; password = $agentPassword; name = $agentName
+}
+
+if ($register.ok) {
+    Write-Host '  สมัครบัญชีใหม่ให้ AI แล้ว' -ForegroundColor Green
+} elseif ($register.code -eq 'email_taken') {
+    # ─────────────────────────────────────────────────────────────────────
+    #  มีบัญชีอยู่แล้วจากการรันครั้งก่อน — เราไม่รู้รหัสผ่านเดิม (มันสุ่มและ
+    #  เก็บไว้ใน User Secrets เท่านั้น) และไม่มี endpoint รีเซ็ตรหัสผ่าน
+    #
+    #  ถ้า Pm:Password เดิมยังอยู่ก็ใช้ต่อได้ ถ้าไม่มีต้องบอกให้ชัดว่าต้องทำอะไร
+    #  ไม่ใช่เขียนค่าใหม่ทับแล้วปล่อยให้ login ล้มเหลวทีหลังโดยไม่รู้สาเหตุ
+    # ─────────────────────────────────────────────────────────────────────
+    if ($existing['Pm:Password'] -and $existing['Pm:Email'] -eq $agentEmail) {
+        Write-Host '  บัญชีนี้มีอยู่แล้ว — ใช้รหัสผ่านเดิมจาก User Secrets' -ForegroundColor Yellow
+        $agentPassword = $null      # null = ไม่เขียนทับค่าที่เก็บไว้
+    } else {
+        Write-Error @"
+บัญชี $agentEmail มีอยู่แล้วแต่ไม่มีรหัสผ่านเก็บไว้ใน User Secrets ของโปรเจกต์นี้
+
+เลือกทางใดทางหนึ่ง:
+  · ลบบัญชีนั้นออกจากฐานข้อมูลแล้วรันสคริปต์นี้อีกครั้ง
+  · หรือตั้งรหัสผ่านที่ถูกต้องเอง:
+      dotnet user-secrets set 'Pm:Email' '$agentEmail' --project mcp
+      dotnet user-secrets set 'Pm:Password' '<รหัสผ่านของบัญชีนั้น>' --project mcp
+"@
+    }
+} else {
+    Write-Error "สมัครบัญชีให้ AI ไม่สำเร็จ: $($register.message)"
+}
+
+# ─── 2d. เชิญเข้า workspace แล้วทำเครื่องหมายว่าเป็น agent ──────────────────
+$add = Invoke-Api -Method Post -Path '/workspaces/current/members' -Token $ownerToken `
+    -WorkspaceId $target.id -Body @{ email = $agentEmail; role = 'member' }
+
+if ($add.ok) {
+    $agentUserId = $add.data.userId
+    Write-Host '  เชิญเข้า workspace เป็น member แล้ว' -ForegroundColor Green
+} elseif ($add.code -eq 'already_member') {
+    Write-Host '  เป็นสมาชิกอยู่แล้ว' -ForegroundColor Yellow
+    $members = Invoke-Api -Method Get -Path '/workspaces/current/members' -Token $ownerToken -WorkspaceId $target.id
+    if (-not $members.ok) { Write-Error "อ่านรายชื่อสมาชิกไม่ได้: $($members.message)" }
+    $agentUserId = ($members.data | Where-Object { $_.email -eq $agentEmail }).userId
+    if (-not $agentUserId) { Write-Error "หาบัญชี $agentEmail ในรายชื่อสมาชิกไม่เจอ" }
+} else {
+    Write-Error "เชิญเข้า workspace ไม่สำเร็จ: $($add.message)"
+}
+
+# ทำเครื่องหมายว่าเป็นบัญชีของ AI — owner/admin เท่านั้นที่ตั้งได้ (ดู UpdateMemberRoleRequest)
+$mark = Invoke-Api -Method Patch -Path "/workspaces/current/members/$agentUserId" `
+    -Token $ownerToken -WorkspaceId $target.id -Body @{ role = 'member'; kind = 'agent' }
+
+if (-not $mark.ok) { Write-Error "ตั้งประเภทบัญชีเป็น agent ไม่สำเร็จ: $($mark.message)" }
+Write-Host '  ทำเครื่องหมายว่าเป็นบัญชีของ AI แล้ว' -ForegroundColor Green
+
+# ─── 2e. เก็บลง User Secrets ───────────────────────────────────────────────
+# แยกออกมาเป็นตัวแปรก่อน ไม่ส่ง $target.slug ตรง ๆ — property access ใน argument
+# position ทำงานถูก แต่ใน "สตริง" ไม่ทำงาน (ได้ 'System.Object.slug') การแยกไว้
+# ทำให้ไม่มีใครเผลอเติม quote ทีหลังแล้วพังเงียบ ๆ
+$workspaceSlug = $target.slug
 
 dotnet user-secrets init --project $project | Out-Null
-if ($null -ne $email)    { dotnet user-secrets set 'Pm:Email' $email --project $project | Out-Null }
-if ($null -ne $password) { dotnet user-secrets set 'Pm:Password' $password --project $project | Out-Null }
-if ($null -ne $apiUrl)   { dotnet user-secrets set 'Pm:ApiUrl' $apiUrl --project $project | Out-Null }
-if (-not [string]::IsNullOrWhiteSpace($workspace)) {
-    dotnet user-secrets set 'Pm:Workspace' $workspace --project $project | Out-Null
+dotnet user-secrets set 'Pm:Email' $agentEmail --project $project | Out-Null
+dotnet user-secrets set 'Pm:ApiUrl' $apiUrl --project $project | Out-Null
+dotnet user-secrets set 'Pm:Workspace' $workspaceSlug --project $project | Out-Null
+if ($null -ne $agentPassword) {
+    dotnet user-secrets set 'Pm:Password' $agentPassword --project $project | Out-Null
 }
 
 Write-Host ''
@@ -95,8 +275,15 @@ dotnet user-secrets list --project $project | ForEach-Object {
 }
 
 Write-Host ''
+Write-Host "AI จะทำงานในนาม $agentName ($agentEmail)" -ForegroundColor Cyan
+Write-Host "ใน workspace: $($target.name)  ·  สิทธิ์: member"
+Write-Host 'ทุกอย่างที่ AI แก้จะถูกบันทึกเป็นการแก้ของบัญชีนี้ ไม่ใช่ของคุณ'
+Write-Host ''
 Write-Host 'ขั้นต่อไป:' -ForegroundColor Cyan
 Write-Host '  1. เปิด API ทิ้งไว้:   dotnet run --project api'
 Write-Host '  2. เปิด Claude Code ใหม่ในโฟลเดอร์นี้ แล้วอนุญาต MCP server ชื่อ projectmanagement'
 Write-Host '  3. ตรวจด้วยคำสั่ง /mcp — ต้องเห็น projectmanagement เป็น connected'
+Write-Host ''
+Write-Host 'อยากจำกัดว่า AI เห็นหน้าไหนได้: ใช้สิทธิ์ระดับหน้า (page ACL) กับบัญชีนี้' -ForegroundColor DarkGray
+Write-Host 'อย่าลดเป็น guest — guest สร้างหน้าระดับบนสุดไม่ได้ AI จะลองซ้ำไม่จบ' -ForegroundColor DarkGray
 Write-Host ''

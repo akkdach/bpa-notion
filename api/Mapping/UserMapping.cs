@@ -24,7 +24,8 @@ public static class UserMapping
         user.Email,
         user.Name,
         user.AvatarUrl,
-        user.Locale);
+        user.Locale,
+        user.Kind.ToDbValue());
 }
 
 public static class WorkspaceMapping

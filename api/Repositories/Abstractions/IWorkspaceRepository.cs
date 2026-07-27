@@ -36,4 +36,5 @@ public record MemberRow(
     string Name,
     string? AvatarUrl,
     WorkspaceRole Role,
+    UserKind Kind,
     DateTimeOffset JoinedAt);

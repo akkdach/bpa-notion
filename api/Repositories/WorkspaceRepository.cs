@@ -49,7 +49,8 @@ public class WorkspaceRepository(AppDbContext db, ITenantContext tenant) : IWork
             join user in db.Users.AsNoTracking() on member.UserId equals user.Id
             orderby member.Role descending, user.Name
             select new MemberRow(
-                user.Id, user.Email, user.Name, user.AvatarUrl, member.Role, member.JoinedAt))
+                user.Id, user.Email, user.Name, user.AvatarUrl,
+                member.Role, user.Kind, member.JoinedAt))
            .ToListAsync(ct);
 
     public Task<WorkspaceMember?> FindMemberAsync(Guid userId, CancellationToken ct = default)

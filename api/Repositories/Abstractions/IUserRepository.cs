@@ -1,3 +1,4 @@
+using ProjectManagementAPI.Domain;
 using ProjectManagementAPI.Models;
 
 namespace ProjectManagementAPI.Repositories.Abstractions;
@@ -8,6 +9,12 @@ public interface IUserRepository
     Task<User> AddAsync(User user, CancellationToken ct = default);
     Task<User?> GetByIdAsync(Guid userId, CancellationToken ct = default);
     Task TouchLastLoginAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ตั้งว่าบัญชีนี้เป็นของคนหรือของ AI — owner/admin เท่านั้นที่เรียกถึง
+    /// (ตรวจสิทธิ์อยู่ที่ WorkspaceService ไม่ใช่ที่นี่)
+    /// </summary>
+    Task UpdateKindAsync(Guid userId, UserKind kind, CancellationToken ct = default);
 
     // ─── refresh token ───────────────────────────────────────────────────
     Task AddRefreshTokenAsync(RefreshToken token, CancellationToken ct = default);

@@ -46,4 +46,7 @@ public static class RoleConverters
 
     public static readonly ValueConverter<AclSubjectType, string> AclSubjectType =
         Build(RoleNames.SubjectType);
+
+    public static readonly ValueConverter<UserKind, string> UserKind =
+        Build(RoleNames.Kinds);
 }

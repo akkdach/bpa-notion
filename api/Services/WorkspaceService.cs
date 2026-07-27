@@ -17,6 +17,7 @@ namespace ProjectManagementAPI.Services;
 // ═══════════════════════════════════════════════════════════════════════════
 public class WorkspaceService(
     IWorkspaceRepository workspaces,
+    IUserRepository users,
     IIdentityQueries identity,
     ITenantContext tenant,
     ILogger<WorkspaceService> logger) : IWorkspaceService
@@ -97,7 +98,8 @@ public class WorkspaceService(
         var rows = await workspaces.ListMembersAsync(ct);
 
         return rows.Select(r => new MemberDto(
-            r.UserId, r.Email, r.Name, r.AvatarUrl, r.Role.ToDbValue(), r.JoinedAt)).ToList();
+            r.UserId, r.Email, r.Name, r.AvatarUrl,
+            r.Role.ToDbValue(), r.Kind.ToDbValue(), r.JoinedAt)).ToList();
     }
 
     public async Task<Result<MemberDto>> AddMemberAsync(
@@ -147,7 +149,8 @@ public class WorkspaceService(
             user.Id, member.WorkspaceId, role);
 
         return new MemberDto(
-            user.Id, user.Email, user.Name, user.AvatarUrl, role.ToDbValue(), member.JoinedAt);
+            user.Id, user.Email, user.Name, user.AvatarUrl,
+            role.ToDbValue(), user.Kind.ToDbValue(), member.JoinedAt);
     }
 
     public async Task<Result> UpdateMemberRoleAsync(
@@ -186,7 +189,50 @@ public class WorkspaceService(
         }
 
         await workspaces.UpdateMemberRoleAsync(userId, role, ct);
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ประเภทบัญชี (คน / AI) — ไม่บังคับ ส่งมาเมื่อต้องการเปลี่ยนเท่านั้น
+        //
+        //  ตั้งหลัง role เพราะ role เป็นเรื่องหลักของ endpoint นี้ ถ้า kind ผิดรูป
+        //  เราอยากให้ 400 ก่อนที่จะเขียนอะไรเลย จึง parse ไว้ตั้งแต่ต้น method ไม่ได้
+        //  — แต่ก็ยอมรับได้เพราะสองการเขียนนี้ไม่ต้อง atomic ต่อกัน (คนละความหมาย
+        //  และไม่มี invariant ร่วม)
+        // ─────────────────────────────────────────────────────────────────
+        if (request.Kind is not null)
+        {
+            if (!TryParseUserKind(request.Kind, out var kind))
+            {
+                return Error.Validation(
+                    $"ไม่รู้จักประเภทบัญชี '{request.Kind}' — ต้องเป็น " +
+                    $"{string.Join(" หรือ ", RoleNames.Kinds.Values)}",
+                    "invalid_user_kind");
+            }
+
+            await users.UpdateKindAsync(userId, kind, ct);
+
+            logger.LogInformation(
+                "ตั้งประเภทบัญชี {UserId} เป็น {Kind} โดย {ActorId}",
+                userId, kind, tenant.RequireUserId());
+        }
+
         return Result.Success();
+    }
+
+    private static bool TryParseUserKind(string value, out UserKind kind)
+    {
+        var normalised = value.Trim().ToLowerInvariant();
+
+        foreach (var (candidate, name) in RoleNames.Kinds)
+        {
+            if (string.Equals(name, normalised, StringComparison.Ordinal))
+            {
+                kind = candidate;
+                return true;
+            }
+        }
+
+        kind = UserKind.Human;
+        return false;
     }
 
     public async Task<Result> RemoveMemberAsync(Guid userId, CancellationToken ct = default)

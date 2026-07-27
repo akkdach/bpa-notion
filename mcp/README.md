@@ -16,16 +16,36 @@ Claude Code  ──stdio/JSON-RPC──▶  ProjectManagementMcp  ──HTTP─�
 pwsh scripts/setup-mcp.ps1
 ```
 
-สคริปต์จะ build เป็น Release แล้วถามอีเมล/รหัสผ่านของบัญชีในแอป เก็บลง
-[.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets)
-ที่ `%APPDATA%\Microsoft\UserSecrets\` — **นอก repo** จากนั้น
+สคริปต์จะ build เป็น Release แล้ว **สร้างบัญชีของ AI แยกจากบัญชีคุณ**:
+
+1. ถามอีเมล/รหัสผ่าน **ของคุณ** (ต้องเป็น owner/admin) เพื่อขอสิทธิ์เชิญสมาชิก
+2. ให้เลือก workspace ที่ AI จะเข้าถึง
+3. สมัครบัญชี `claude+<slug>@<slug>.local` ด้วยรหัสผ่านสุ่ม
+4. เชิญเข้า workspace เป็น **member** แล้วทำเครื่องหมาย `kind = agent`
+5. เก็บ credential ของบัญชี AI ลง
+   [.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets)
+   ที่ `%APPDATA%\Microsoft\UserSecrets\` — **นอก repo**
+
+จากนั้น
 
 1. เปิด API ทิ้งไว้ — `dotnet run --project api`
 2. เปิด Claude Code ใหม่ในโฟลเดอร์ `d:/Projects/notion` แล้วอนุญาต MCP server ชื่อ `projectmanagement`
 3. ตรวจด้วย `/mcp` — ต้องเห็นสถานะ connected
 
-> AI จะเห็นและแก้ได้**เท่าที่บัญชีนั้นเห็นและแก้ได้** ไม่มีสิทธิ์พิเศษ ถ้าอยากจำกัด
-> ขอบเขต ให้สร้างบัญชีแยกแล้วเชิญเข้าเฉพาะ workspace ที่ต้องการ
+### ทำไม AI ต้องมีบัญชีของตัวเอง
+
+ของเดิมให้ AI ใช้บัญชีเดียวกับเจ้าของ ผลคือ `pages.last_edited_by` เป็นค่าเดียวกัน
+ทั้งตอนคนแก้และตอน AI แก้ — คำถามว่า **"อันนี้ฉันแก้เองหรือ AI แก้"** จึงตอบไม่ได้เลย
+ซึ่งทำให้เป้าหมาย "เจ้าของตรวจงานที่ AI ทำได้ง่าย" เป็นไปไม่ได้ตั้งแต่ต้น
+
+`users.kind` (`human` / `agent`) **ไม่ใช่ระดับสิทธิ์** — agent ได้สิทธิ์จาก
+`workspace_members` เหมือนคนทุกอย่าง และ**ตั้งเองตอนสมัครไม่ได้** ต้องให้ owner/admin
+เป็นคนยืนยันผ่าน `PATCH /workspaces/current/members/{userId}` ถ้าใครตั้งเองได้ ก็ปลอมให้
+การแก้ของตัวเองดูเหมือน AI ทำ (หรือกลับกัน) ได้ ซึ่งทำลายจุดประสงค์ทั้งหมด
+
+> **role ต้องเป็น `member` ไม่ใช่ `guest`** — guest สร้างหน้าระดับบนสุดไม่ได้
+> ([PageTreeService](../api/Services/PageTreeService.cs)) AI จะเจอ Forbidden แล้วลองซ้ำไม่จบ
+> อยากจำกัดขอบเขตให้ใช้สิทธิ์ระดับหน้า (page ACL) กับบัญชีนั้น
 
 ## config
 
@@ -34,8 +54,8 @@ pwsh scripts/setup-mcp.ps1
 | User Secrets | env var | ค่าเริ่มต้น |
 |---|---|---|
 | `Pm:ApiUrl` | `PM_API_URL` | `http://localhost:5081` |
-| `Pm:Email` | `PM_EMAIL` | *(จำเป็น)* |
-| `Pm:Password` | `PM_PASSWORD` | *(จำเป็น)* |
+| `Pm:Email` | `PM_EMAIL` | *(จำเป็น)* — อีเมลของบัญชี **AI** ไม่ใช่ของคุณ |
+| `Pm:Password` | `PM_PASSWORD` | *(จำเป็น)* — รหัสผ่านสุ่มที่ setup-mcp ตั้งให้ |
 | `Pm:Workspace` | `PM_WORKSPACE` | ข้ามได้ถ้าบัญชีมี workspace เดียว |
 
 env var มีไว้สำหรับ container / CI ที่ไม่มี secret store ส่วนบนเครื่อง dev ใช้

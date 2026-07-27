@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ProjectManagementAPI.Data;
+using ProjectManagementAPI.Domain;
 using ProjectManagementAPI.Models;
 using ProjectManagementAPI.Repositories.Abstractions;
 
@@ -32,6 +33,14 @@ public class UserRepository(AppDbContext db, ILogger<UserRepository> logger) : I
         => db.Users
              .Where(u => u.Id == userId)
              .ExecuteUpdateAsync(s => s.SetProperty(u => u.LastLoginAt, DateTimeOffset.UtcNow), ct);
+
+    public Task UpdateKindAsync(Guid userId, UserKind kind, CancellationToken ct = default)
+        // users ไม่มี tenant query filter (ดู AppDbContext) — การจำกัดว่าแก้ได้เฉพาะ
+        // สมาชิกใน workspace ของตัวเองอยู่ที่ WorkspaceService ที่เรียก FindMemberAsync
+        // ก่อนเสมอ ที่นี่จึงเป็น update ตรง ๆ ตาม id
+        => db.Users
+             .Where(u => u.Id == userId)
+             .ExecuteUpdateAsync(s => s.SetProperty(u => u.Kind, kind), ct);
 
     public async Task AddRefreshTokenAsync(RefreshToken token, CancellationToken ct = default)
     {
