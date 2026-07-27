@@ -159,6 +159,6 @@ test('แก้ต่อในเบราว์เซอร์หลังเ�
 
   await page.reload()
   await expect(editorBody(page)).toContainText(TYPED, { timeout: 15_000 })
-  await expect(editorBody(page)).toContainText(FROM_SERVER[0]!)
+  await expect(editorBody(page)).toContainText(FROM_SERVER[0])
   await expect(editorBody(page)).toContainText(extra)
 })

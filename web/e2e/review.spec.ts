@@ -27,6 +27,22 @@ const NOTE = 'ดึงข้อมูลจากระบบบัญชีแ
 
 const sidebar = (page: Page) => page.getByRole('navigation', { name: 'หน้าทั้งหมด' })
 
+/**
+ * envelope ที่ API ตอบกลับทุก endpoint (ตรงกับ Helpers/ApiResponse.cs)
+ *
+ * ประกาศไว้เองเพราะ e2e อยู่คนละ tsconfig กับ src/ จึง import จาก lib/apiClient
+ * ไม่ได้ — และการปล่อยเป็น any ทำให้ eslint ฟ้อง no-unsafe-member-access ถูกแล้ว:
+ * เทสที่อ่าน .data.id จาก any จะพังตอน runtime ถ้ารูปร่าง response เปลี่ยน
+ */
+interface Envelope<T> {
+  success: boolean
+  data: T
+}
+
+async function envelope<T>(response: { json: () => Promise<unknown> }): Promise<T> {
+  return ((await response.json()) as Envelope<T>).data
+}
+
 test.describe.configure({ mode: 'serial' })
 
 // ประกอบใน setup แล้วใช้ต่อทุกเทส (mode: serial รับประกันลำดับ)
@@ -75,9 +91,9 @@ test('เตรียมข้อมูล: AI สร้างงาน เป�
     data: { email: agentEmail, password, name: 'Claude (AI)' },
   })
   expect(agentReg.status(), await agentReg.text()).toBe(200)
-  const agentBody = await agentReg.json()
-  const agentToken = agentBody.data.accessToken
-  const agentId = agentBody.data.user.id
+  const agentAuth = await envelope<{ accessToken: string; user: { id: string } }>(agentReg)
+  const agentToken = agentAuth.accessToken
+  const agentId = agentAuth.user.id
 
   await request.post(`${API}/workspaces/current/members`, {
     headers: asOwner,
@@ -100,7 +116,7 @@ test('เตรียมข้อมูล: AI สร้างงาน เป�
     data: { parentId: null, title: TASK, status: 'todo' },
   })
   expect(created.status(), await created.text()).toBe(201)
-  taskId = (await created.json()).data.id
+  taskId = (await envelope<{ id: string }>(created)).id
 
   await request.patch(`${API}/pages/${taskId}`, {
     headers: asAgent, data: { status: 'doing' },
