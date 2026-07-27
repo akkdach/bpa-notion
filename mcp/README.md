@@ -1,5 +1,10 @@
 # MCP server — ให้ Claude Code สั่งงานแอปได้
 
+> 📘 **แค่จะเชื่อมต่อให้ใช้งานได้ ไม่ต้องอ่านไฟล์นี้** — ทำตาม
+> [`docs/connect-ai.md`](../docs/connect-ai.md) ซึ่งเป็นคู่มือสำหรับผู้ใช้
+>
+> ไฟล์นี้เป็นเอกสารเชิงเทคนิคสำหรับคนที่ต้องแก้ตัว MCP server เอง
+
 MCP server แบบ stdio ที่ครอบ REST API ของ `api/` ให้ Claude Code เรียกเป็น tool
 ได้โดยตรง คุยกับ API ผ่าน HTTP เหมือน client ทั่วไป **ไม่แตะฐานข้อมูลเอง** จึงได้
 tenant isolation, permission check และ validation ชุดเดียวกับที่เว็บได้

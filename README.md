@@ -152,6 +152,9 @@ dotnet run scripts/run-sql.cs db/probe/thai-search-probe.sql   # ต้อง PA
 └─ .mcp.json                   ← Claude Code อ่านไฟล์นี้เพื่อรู้จัก MCP server ข้างบน
 ```
 
+> **เชื่อมต่อ AI เข้ากับระบบ** — ทำตาม [`docs/connect-ai.md`](docs/connect-ai.md)
+> (คู่มือสำหรับผู้ใช้/ลูกค้า) ส่วนรายละเอียดเชิงเทคนิคอยู่ใน [`mcp/README.md`](mcp/README.md)
+
 > `mcp/` คุยกับแอปผ่าน REST API เหมือน client ทั่วไป **ไม่แตะฐานข้อมูลเอง** จึงได้
 > tenant isolation และ permission check ชุดเดียวกับที่เว็บได้ ไม่ต้องเขียนซ้ำ
 
