@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { ClipboardCheck, Loader2, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AppShell } from '@/components/layout/AppShell'
 import { useUiStore } from '@/store/uiStore'
@@ -143,15 +143,26 @@ export function WorkspacePage() {
         )
       }
       sidebarFooter={
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start gap-2 text-muted-foreground"
-          onClick={() => void navigate('/trash')}
-        >
-          <Trash2 className="size-4" aria-hidden />
-          ถังขยะ
-        </Button>
+        <div className="space-y-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={() => void navigate('/review')}
+          >
+            <ClipboardCheck className="size-4" aria-hidden />
+            ตรวจงาน
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={() => void navigate('/trash')}
+          >
+            <Trash2 className="size-4" aria-hidden />
+            ถังขยะ
+          </Button>
+        </div>
       }
     >
       {pageId === undefined ? (

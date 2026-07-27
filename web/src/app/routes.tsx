@@ -4,6 +4,7 @@ import { LoginPage } from '@/page/LoginPage'
 import { WorkspacePage } from '@/page/WorkspacePage'
 import { SettingsPage } from '@/page/SettingsPage'
 import { TrashPage } from '@/page/TrashPage'
+import { ReviewPage } from '@/page/ReviewPage'
 import { HealthPage } from '@/page/HealthPage'
 
 export const routes: RouteObject[] = [
@@ -17,6 +18,10 @@ export const routes: RouteObject[] = [
   { path: '/settings/:section', element: <RequireAuth><SettingsPage /></RequireAuth> },
 
   { path: '/trash', element: <RequireAuth><TrashPage /></RequireAuth> },
+
+  // ตัวกรองอยู่ใน query string (?tab=activity&actor=agent) เพื่อให้ส่งลิงก์
+  // "ดูเฉพาะที่ AI ทำ" ให้คนอื่นได้ และปุ่มย้อนกลับของเบราว์เซอร์ทำงาน
+  { path: '/review', element: <RequireAuth><ReviewPage /></RequireAuth> },
 
   // หน้าตรวจสุขภาพระบบจาก Phase 0 — ยังมีประโยชน์ตอน deploy
   { path: '/health', element: <HealthPage /> },

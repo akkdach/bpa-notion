@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import { usePage } from '@/features/pages'
 import { PageEditor, useYDoc } from '@/features/editor'
+import { NotePanel, useAddNote, useNotes } from '@/features/activity'
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  PageView — ต่อ metadata ของหน้าเข้ากับเนื้อหา Yjs
@@ -9,6 +10,8 @@ import { PageEditor, useYDoc } from '@/features/editor'
 export function PageView({ pageId }: { pageId: string }) {
   const page = usePage(pageId)
   const { doc, status, reportProjection } = useYDoc(pageId)
+  const notes = useNotes(pageId)
+  const addNote = useAddNote(pageId)
 
   // useCallback เพื่อไม่ให้ effect ที่ subscribe onChange ใน PageEditor
   // ถูก unsubscribe/resubscribe ทุกครั้งที่ render
@@ -33,7 +36,10 @@ export function PageView({ pageId }: { pageId: string }) {
     )
   }
 
-  const canEdit = page.data?.myRole === 'editor' || page.data?.myRole === 'full'
+  const role = page.data?.myRole
+  const canEdit = role === 'editor' || role === 'full'
+  // เขียนบันทึกได้ตั้งแต่ commenter ขึ้นไป — ไม่ต้องแก้เอกสารได้
+  const canComment = canEdit || role === 'commenter'
 
   return (
     <article className="mx-auto max-w-3xl px-12 py-12">
@@ -42,6 +48,13 @@ export function PageView({ pageId }: { pageId: string }) {
         status={status}
         editable={canEdit}
         onChangeProjection={handleProjection}
+      />
+
+      <NotePanel
+        notes={notes.data ?? []}
+        isLoading={notes.isLoading}
+        isSending={addNote.isPending}
+        {...(canComment ? { onAdd: (body: string) => addNote.mutateAsync(body) } : {})}
       />
     </article>
   )

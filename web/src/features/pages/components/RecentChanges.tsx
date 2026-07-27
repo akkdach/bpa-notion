@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { formatRelative } from '@/lib/relativeTime'
 import { StatusChip } from './StatusChip'
 import type { PageNode } from '../types'
 
@@ -74,34 +75,3 @@ export function RecentChanges({
   )
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  เวลาแบบ "5 นาทีที่แล้ว"
-//
-//  เขียนเองแทนใช้ date-fns/formatDistance เพราะต้องการรูปแบบไทยสั้น ๆ ที่คุม
-//  ถ้อยคำได้เอง และ Intl.RelativeTimeFormat มีอยู่ในทุกเบราว์เซอร์ที่รองรับแล้ว
-// ═══════════════════════════════════════════════════════════════════════════
-const relative = new Intl.RelativeTimeFormat('th-TH', { numeric: 'auto' })
-
-function formatRelative(iso: string): string {
-  const seconds = (Date.parse(iso) - Date.now()) / 1000
-
-  // เวลาในอนาคตเกิดได้จาก clock skew ระหว่างเซิร์ฟเวอร์กับเครื่องผู้ใช้
-  // "อีก 3 วินาที" อ่านแล้วสับสน จึงบีบให้เป็น "เมื่อสักครู่"
-  if (seconds > -45 && seconds < 45) return 'เมื่อสักครู่'
-
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ['year', 60 * 60 * 24 * 365],
-    ['month', 60 * 60 * 24 * 30],
-    ['day', 60 * 60 * 24],
-    ['hour', 60 * 60],
-    ['minute', 60],
-  ]
-
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) {
-      return relative.format(Math.round(seconds / size), unit)
-    }
-  }
-
-  return 'เมื่อสักครู่'
-}

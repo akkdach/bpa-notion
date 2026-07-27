@@ -97,7 +97,9 @@ test('สมัคร สร้าง workspace และสร้างหน�
 
   // พิมพ์ชื่อเรื่องเพื่อให้ projection ตั้ง title ให้ (บรรทัดแรก = ชื่อหน้า)
   // debounce 2 วินาทีใน useYDoc + round-trip → รอได้นานกว่าปกติ
-  await page.getByRole('textbox').last().click()
+  // ⚠️ ต้องเจาะจง [contenteditable] ไม่ใช่ getByRole('textbox') — แผงบันทึก
+  //    ความคืบหน้าใต้ editor มี <textarea> ที่เป็น role="textbox" เหมือนกัน
+  await page.locator('[contenteditable="true"]').last().click()
   await page.keyboard.type(TASK_TITLE)
   await expect(treeRow(page, TASK_TITLE)).toBeVisible({ timeout: 15_000 })
 })

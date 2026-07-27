@@ -24,11 +24,16 @@ const CONTENT = 'บันทึกประชุมทีมพัฒนา �
 /**
  * ตัว editor ของ BlockNote
  *
- * ใช้ role ไม่ใช่ class — ชื่อคลาสภายในของ BlockNote เปลี่ยนได้ระหว่างเวอร์ชัน
- * (0.x) ส่วน role="textbox" มาจาก contenteditable ของ ProseMirror ซึ่งเสถียร
- * และตรงกับสิ่งที่ screen reader เห็นจริง
+ * ใช้ `[contenteditable]` ไม่ใช่ชื่อคลาส — ชื่อคลาสภายในของ BlockNote เปลี่ยนได้
+ * ระหว่างเวอร์ชัน (0.x) ส่วน contenteditable เป็น attribute ของ ProseMirror ที่เสถียร
+ * และเป็นตัวที่ทำให้ ARIA เห็นมันเป็น textbox ตั้งแต่แรก
+ *
+ * ⚠️ เคยเป็น getByRole('textbox').last() แล้วพังตอนเพิ่มแผงบันทึกความคืบหน้า
+ *    ใต้ editor — <textarea> ของแผงนั้นก็เป็น role="textbox" เหมือนกัน `.last()`
+ *    จึงไปเจอช่องเขียนบันทึกแทน editor แล้วเทสพิมพ์ผิดที่โดยไม่มีอะไรฟ้อง
+ *    (ไม่มี projection ถูกส่ง ชื่อใน sidebar เลยไม่อัปเดต และเนื้อหาไม่ถูกบันทึก)
  */
-const editorBody = (page: Page) => page.getByRole('textbox').last()
+const editorBody = (page: Page) => page.locator('[contenteditable="true"]').last()
 
 test.describe.configure({ mode: 'serial' })
 
