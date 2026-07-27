@@ -97,12 +97,45 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
                 index + 1 < siblings.Count ? siblings[index + 1].Rank : null);
     }
 
-    public async Task<Page> AddAsync(Page page, CancellationToken ct = default)
-    {
-        db.Pages.Add(page);
-        await db.SaveChangesAsync(ct);
-        return page;
-    }
+    // ═══════════════════════════════════════════════════════════════════════
+    //  สร้างหน้า — สามอย่างในธุรกรรมเดียว
+    //
+    //  เดิม service เรียก AddAsync แล้ว AddAclAsync ต่อ ซึ่ง commit แยกกัน
+    //  ถ้า ACL ล้มหลังหน้าถูกสร้างแล้ว จะได้หน้าระดับบนสุดที่เป็น access root
+    //  โดยไม่มี grant ใด ๆ = ไม่มีใครเห็นเลย รวมทั้งคนสร้าง (owner/admin ยังเห็น
+    //  เพราะ short-circuit แต่ member จะไม่เห็น) และไม่มีทางแก้จากหน้าเว็บ
+    //
+    //  ⚠️ แถวใน page_searches ถูกสร้างที่นี่ด้วยโดยเจตนา
+    //
+    //     ก่อนหน้านี้แถวนั้นเกิดขึ้นเมื่อเบราว์เซอร์ POST /projection เท่านั้น
+    //     (หลังผู้ใช้หยุดพิมพ์ 2 วินาที) แปลว่าหน้าที่ AI สร้างและยังไม่มีใครเปิด
+    //     "ไม่มีแถวใน page_searches เลย" — ไม่ใช่แถวที่ล้าสมัย แต่ไม่มีอยู่
+    //     ผลคือการค้นหาจะไม่เจอผลงานของ AI เองตลอดไป ซึ่งกลับหัวกลับหางกับ
+    //     เป้าหมายของการให้ AI อ่านงานได้
+    //
+    //     body ว่างเป็นค่าที่ถูกต้อง: หน้าที่เพิ่งสร้างยังไม่มีเนื้อหาจริง ๆ
+    //     ส่วน title มาจากผู้สร้าง เบราว์เซอร์จะทับด้วยบรรทัดแรกของเอกสารทีหลัง
+    // ═══════════════════════════════════════════════════════════════════════
+    public Task<Page> AddAsync(Page page, PageAcl? acl = null, CancellationToken ct = default)
+        => db.InTransactionAsync(async token =>
+        {
+            db.Pages.Add(page);
+
+            if (acl is not null) db.PageAcls.Add(acl);
+
+            db.PageSearches.Add(new PageSearch
+            {
+                PageId = page.Id,
+                WorkspaceId = page.WorkspaceId,
+                AccessRootId = page.AccessRootId,
+                Title = page.Title,
+                BodyText = string.Empty,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+
+            await db.SaveChangesAsync(token);
+            return page;
+        }, ct);
 
     public Task UpdateTitleAsync(
         Guid pageId, string title, Guid editorId, CancellationToken ct = default)

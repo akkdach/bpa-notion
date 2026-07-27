@@ -295,6 +295,11 @@ jobs:
       - name: verify-ydoc (Y.Doc → bytea → bootstrap ครบรอบ)
         run: node scripts/verify-ydoc.mjs "$API_BASE"
 
+      # ⚠️ ค้นด้วยคำ "กลาง" ประโยคเท่านั้น — คำต้นประโยคผ่านได้แม้ tokenizer ผิด
+      #    เพราะ prefix match ทำงาน (ดู 003_pgroonga_indexes.sql)
+      - name: verify-search (ค้นไทยกลางคำ + อ่านเนื้อหาหน้า)
+        run: node scripts/verify-search.mjs "$API_BASE"
+
       - name: verify-repair (ทำ ancestor_ids/access_root_id เพี้ยนแล้วซ่อม)
         run: node scripts/verify-repair.mjs "$API_BASE"
 

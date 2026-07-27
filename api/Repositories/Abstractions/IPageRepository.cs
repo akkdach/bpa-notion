@@ -22,7 +22,14 @@ public interface IPageRepository
     Task<(string? Before, string? After)> GetNeighbourRanksAsync(
         Guid? parentId, Guid? afterPageId, CancellationToken ct = default);
 
-    Task<Page> AddAsync(Page page, CancellationToken ct = default);
+    /// <summary>
+    /// สร้างหน้า พร้อม ACL (ถ้ามี) และแถวใน page_searches ในธุรกรรมเดียว
+    /// </summary>
+    /// <param name="acl">
+    /// ACL ที่ต้องเกิดพร้อมหน้า — ใช้กับหน้าระดับบนสุดซึ่งเป็น access root ของตัวเอง
+    /// null = หน้าลูกที่สืบทอดสิทธิ์จากพ่อ
+    /// </param>
+    Task<Page> AddAsync(Page page, PageAcl? acl = null, CancellationToken ct = default);
 
     Task UpdateTitleAsync(Guid pageId, string title, Guid editorId, CancellationToken ct = default);
 

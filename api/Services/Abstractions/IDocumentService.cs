@@ -20,6 +20,14 @@ public interface IDocumentService
     /// <summary>หน้าที่ลิงก์มาหาหน้านี้ — กรองตามสิทธิ์ของหน้าต้นทางแล้ว</summary>
     Task<Result<IReadOnlyList<BacklinkDto>>> GetBacklinksAsync(
         Guid pageId, CancellationToken ct = default);
+
+    /// <summary>
+    /// เนื้อหาหน้าเป็น plain text — ต้องมีสิทธิ์ "อ่าน" หน้านั้น
+    ///
+    /// ทางเดียวที่เซิร์ฟเวอร์และ AI อ่านเนื้อหาได้ เพราะเอกสารจริงเป็น CRDT ทึบ
+    /// คืน freshness มาด้วยเสมอ เพื่อให้ผู้เรียกแยก "หน้าว่าง" จาก "ยังไม่มีข้อมูล" ได้
+    /// </summary>
+    Task<Result<PageContentDto>> GetContentAsync(Guid pageId, CancellationToken ct = default);
 }
 
 /// <param name="Frames">ไบนารี [u32 count][u32 len][bytes]… frame 0 = snapshot</param>

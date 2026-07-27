@@ -95,6 +95,20 @@ public class PageDocumentsController(IDocumentService documents) : ControllerBas
     }
 
     /// <summary>
+    /// เนื้อหาหน้าเป็น plain text — ทางที่ไม่ใช่เบราว์เซอร์ (เช่น AI ผ่าน MCP) อ่านเนื้อหาได้
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ ไม่ใช่ตัวเอกสารจริง — เป็น projection ที่เบราว์เซอร์แกะจาก Y.Doc ส่งกลับมา
+    ///    response มี freshness บอกว่าเชื่อได้แค่ไหน อย่าเดาจาก bodyText ว่างเปล่า
+    ///    ว่าหน้านั้นว่าง (ดู ContentFreshness)
+    /// </remarks>
+    [HttpGet("content")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetContent(Guid pageId, CancellationToken ct)
+        => (await documents.GetContentAsync(pageId, ct)).ToActionResult();
+
+    /// <summary>
     /// plain text ที่ client แกะจาก Y.Doc — ใช้ทำ index ค้นหาและ title ใน sidebar
     /// client ควรส่งหลังผู้ใช้หยุดพิมพ์สักครู่ ไม่ใช่ทุก keystroke
     /// </summary>

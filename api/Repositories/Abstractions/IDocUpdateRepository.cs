@@ -51,9 +51,20 @@ public interface IDocUpdateRepository
     /// <summary>หน้าที่ลิงก์มาหาหน้านี้ — เรียงหน้าที่แก้ล่าสุดขึ้นก่อน</summary>
     Task<IReadOnlyList<PageLinkSource>> GetBacklinksAsync(
         Guid targetPageId, int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// อ่าน projection กลับมา — null = ยังไม่มีแถวของหน้านี้เลย
+    ///
+    /// เป็นทางเดียวที่เซิร์ฟเวอร์ (และ AI ผ่าน MCP) อ่านเนื้อหาหน้าได้ เพราะตัวเอกสาร
+    /// จริงเป็น Yjs CRDT ใน bytea ที่เซิร์ฟเวอร์ไม่แกะโดยเจตนา
+    /// </summary>
+    Task<SearchProjection?> GetSearchProjectionAsync(Guid pageId, CancellationToken ct = default);
 }
 
 public record PageLinkSource(Guid Id, string Title, string? Icon, DateTimeOffset UpdatedAt);
+
+/// <param name="UpdatedAt">เวลาที่ projection ถูกเขียนล่าสุด — ไม่ใช่เวลาที่หน้าถูกแก้ล่าสุด</param>
+public record SearchProjection(string Title, string BodyText, DateTimeOffset UpdatedAt);
 
 /// <param name="Snapshot">null ถ้ายังไม่เคย compact</param>
 /// <param name="Updates">update ที่เกิดหลัง snapshot เรียงตาม seq</param>

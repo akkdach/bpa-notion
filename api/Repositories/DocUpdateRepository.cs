@@ -176,6 +176,15 @@ public class DocUpdateRepository(AppDbContext db, ILogger<DocUpdateRepository> l
     //  เป็นข้อมูล derived ทั้งหมด — ถ้าล้าสมัย ผลค้นหาล้าสมัย แต่ไม่มีอะไรเสีย
     //  สร้างใหม่ได้เสมอจากเอกสารจริง
     // ═══════════════════════════════════════════════════════════════════════
+    public Task<SearchProjection?> GetSearchProjectionAsync(
+        Guid pageId, CancellationToken ct = default)
+        // tenant filter ของ PageSearches ทำงานอยู่ — ไม่ต้องกรอง workspace เอง
+        => db.PageSearches
+             .AsNoTracking()
+             .Where(s => s.PageId == pageId)
+             .Select(s => new SearchProjection(s.Title, s.BodyText, s.UpdatedAt))
+             .FirstOrDefaultAsync(ct);
+
     public async Task UpsertSearchProjectionAsync(
         Guid pageId, Guid accessRootId, string title, string bodyText,
         CancellationToken ct = default)

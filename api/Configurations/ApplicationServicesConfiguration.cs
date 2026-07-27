@@ -41,6 +41,7 @@ public static class ApplicationServicesConfiguration
         services.AddScoped<IPageRepository, PageRepository>();
         services.AddScoped<IPermissionQueries, PermissionQueries>();
         services.AddScoped<IDocUpdateRepository, DocUpdateRepository>();
+        services.AddScoped<ISearchRepository, SearchRepository>();
 
         // ─── Services ────────────────────────────────────────────────────
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
@@ -54,6 +55,7 @@ public static class ApplicationServicesConfiguration
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IPageTreeService, PageTreeService>();
         services.AddScoped<IDocumentService, DocumentService>();
+        services.AddScoped<ISearchService, SearchService>();
 
         // ─── Validators ──────────────────────────────────────────────────
         // scan assembly หา AbstractValidator<T> ทั้งหมด — validator ใหม่ไม่ต้อง

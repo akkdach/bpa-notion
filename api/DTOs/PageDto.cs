@@ -91,3 +91,41 @@ public record ProjectionRequest(string? Title, string? PlainText, IReadOnlyList<
 
 /// <summary>หน้าที่ลิงก์มาหาหน้านี้ (แผง backlinks)</summary>
 public record BacklinkDto(Guid Id, string Title, string? Icon, DateTimeOffset UpdatedAt);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  เนื้อหาหน้าเป็น plain text — ทางที่เซิร์ฟเวอร์และ AI อ่านเนื้อหาได้
+//
+//  ⚠️ เป็นข้อมูล derived ไม่ใช่ตัวเอกสารจริง เอกสารจริงเป็น Yjs CRDT ใน bytea
+//     ที่เซิร์ฟเวอร์ไม่แกะโดยเจตนา (ดู PLAN.md การตัดสินใจข้อ 1-2) ข้อความที่นี่
+//     คือสิ่งที่เบราว์เซอร์แกะแล้วส่งกลับมาให้ index ค้นหา
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>ความน่าเชื่อถือของ plain text ที่คืนไป</summary>
+public static class ContentFreshness
+{
+    /// <summary>
+    /// ยังไม่เคยมีเบราว์เซอร์เปิดหน้านี้ — bodyText ว่างเพราะ "ไม่มีข้อมูล"
+    /// ไม่ใช่เพราะ "หน้าว่าง" ผู้เรียกต้องแยกสองอย่างนี้ออก
+    /// </summary>
+    public const string Never = "never";
+
+    /// <summary>เบราว์เซอร์แกะจากเอกสารจริงแล้วส่งมา — เชื่อได้เท่าที่ projectionUpdatedAt บอก</summary>
+    public const string FromDocument = "from_document";
+}
+
+/// <param name="Freshness">ดู ContentFreshness — เป็นสามสถานะไม่ใช่ boolean โดยเจตนา</param>
+/// <param name="PageUpdatedAt">เวลาที่ metadata ของหน้าถูกแก้ล่าสุด</param>
+/// <param name="ProjectionUpdatedAt">
+/// เวลาที่ plain text ถูกเขียนล่าสุด — null เมื่อ freshness = never
+///
+/// ถ้าค่านี้เก่ากว่า PageUpdatedAt แปลว่าอาจมีการแก้ที่ยังไม่สะท้อนมาถึงข้อความนี้
+/// ผู้เรียกเทียบเองได้ เราไม่สรุปให้เพราะ PageUpdatedAt ขยับตอนเปลี่ยนสถานะ/ไอคอนด้วย
+/// ซึ่งไม่ได้แปลว่าเนื้อหาเปลี่ยน
+/// </param>
+public record PageContentDto(
+    Guid Id,
+    string Title,
+    string BodyText,
+    string Freshness,
+    DateTimeOffset PageUpdatedAt,
+    DateTimeOffset? ProjectionUpdatedAt);

@@ -117,18 +117,19 @@ public class PageTreeService(
 
         if (parent is null) page.AccessRootId = page.Id;
 
-        await pages.AddAsync(page, ct);
-
         // ─────────────────────────────────────────────────────────────────
         //  หน้าระดับบนสุดต้องมี ACL ของตัวเอง ไม่งั้นมันจะเป็น access root
         //  ที่ไม่มี grant ใด ๆ = ไม่มีใครเห็นเลย รวมทั้งคนสร้าง
         //  (owner/admin ยังเห็นเพราะ short-circuit แต่ member จะไม่เห็น)
+        //
+        //  ส่งเข้าไปให้ AddAsync เขียนในธุรกรรมเดียวกับตัวหน้า — ถ้า commit แยกกัน
+        //  แล้ว ACL ล้ม จะเหลือหน้าที่ไม่มีใครเห็นและแก้จากหน้าเว็บไม่ได้
         // ─────────────────────────────────────────────────────────────────
-        if (parent is null)
-        {
-            await pages.AddAclAsync(
-                PageAcl.ForWorkspace(workspaceId, page.Id, PageRole.Editor, userId), ct);
-        }
+        var acl = parent is null
+            ? PageAcl.ForWorkspace(workspaceId, page.Id, PageRole.Editor, userId)
+            : null;
+
+        await pages.AddAsync(page, acl, ct);
 
         logger.LogInformation(
             "สร้างหน้า {PageId} ใต้ {ParentId} depth={Depth}",

@@ -247,6 +247,49 @@ public class DocumentService(
     }
 
     /// <summary>หน้าที่ลิงก์มาหาหน้านี้</summary>
+    // ═══════════════════════════════════════════════════════════════════════
+    //  อ่านเนื้อหาเป็น plain text
+    //
+    //  ไม่ต้องมีสิทธิ์แก้ แค่เห็นหน้าก็อ่านได้ — ต่างจาก SaveProjectionAsync
+    //  ที่ต้อง CanEdit() เพราะมันเขียน
+    // ═══════════════════════════════════════════════════════════════════════
+    public async Task<Result<PageContentDto>> GetContentAsync(
+        Guid pageId, CancellationToken ct = default)
+    {
+        var role = await permissions.GetEffectiveRoleAsync(pageId, ct);
+        if (role is null) return PageNotFound;
+
+        var page = await pages.GetAsync(pageId, ct);
+        if (page is null) return PageNotFound;
+
+        var projection = await documents.GetSearchProjectionAsync(pageId, ct);
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ไม่มีแถว = ยังไม่เคยมีเบราว์เซอร์เปิดหน้านี้
+        //
+        //  ต้องบอกให้ต่างจาก "หน้าว่าง" ให้ชัด ไม่งั้นผู้เรียก (โดยเฉพาะ AI)
+        //  จะสรุปว่าหน้านี้ไม่มีเนื้อหาแล้วเขียนทับหรือรายงานผิด
+        //
+        //  หน้าที่สร้างหลังจากนี้จะมีแถวตั้งแต่เกิด (ดู PageRepository.AddAsync)
+        //  ที่ยังไม่มีคือหน้าเก่าที่สร้างก่อนการเปลี่ยนแปลงนั้น
+        // ─────────────────────────────────────────────────────────────────
+        if (projection is null)
+        {
+            return new PageContentDto(
+                page.Id, page.Title, string.Empty,
+                ContentFreshness.Never, page.UpdatedAt, null);
+        }
+
+        return new PageContentDto(
+            page.Id,
+            // title จาก pages เป็นตัวจริง — projection.Title เป็นสำเนาที่อาจล้ากว่า
+            page.Title,
+            projection.BodyText,
+            ContentFreshness.FromDocument,
+            page.UpdatedAt,
+            projection.UpdatedAt);
+    }
+
     public async Task<Result<IReadOnlyList<BacklinkDto>>> GetBacklinksAsync(
         Guid pageId, CancellationToken ct = default)
     {
