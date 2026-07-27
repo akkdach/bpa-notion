@@ -38,3 +38,40 @@ public sealed record PageDto(
     string Kind,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+/// <summary>
+/// เนื้อหาหน้าเป็น plain text — ผลของ GET /api/v1/pages/{id}/content
+/// </summary>
+/// <param name="Freshness">
+/// "never" = ยังไม่เคยมีเบราว์เซอร์เปิดหน้านี้ BodyText ว่างเพราะ "ไม่มีข้อมูล"
+/// ไม่ใช่เพราะหน้าว่าง — ต้องรายงานให้ต่างกัน
+///
+/// "from_document" = เบราว์เซอร์แกะจากเอกสารจริงแล้วส่งมา
+/// </param>
+public sealed record PageContent(
+    Guid Id,
+    string Title,
+    string BodyText,
+    string Freshness,
+    DateTimeOffset PageUpdatedAt,
+    DateTimeOffset? ProjectionUpdatedAt);
+
+/// <param name="AffectedDescendants">จำนวนลูกหลานที่ถูกอัปเดตไปพร้อมกัน</param>
+public sealed record MoveResult(PageDto Page, int AffectedDescendants);
+
+/// <summary>ผลค้นหา — ผลของ GET /api/v1/search</summary>
+public sealed record SearchResult(
+    string Query,
+    int Count,
+    bool Truncated,
+    IReadOnlyList<SearchHit> Hits);
+
+public sealed record SearchHit(
+    Guid Id,
+    Guid? ParentId,
+    string Title,
+    string? Icon,
+    string? Status,
+    string Snippet,
+    double Score,
+    DateTimeOffset UpdatedAt);

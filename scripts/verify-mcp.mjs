@@ -22,7 +22,25 @@ import { dirname, join } from 'node:path'
 
 const BASE = process.argv[2] ?? 'http://localhost:5081/api/v1'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const DLL = join(ROOT, 'mcp', 'bin', 'Release', 'net10.0', 'ProjectManagementMcp.dll')
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⚠️ PM_MCP_DLL — ทางออกตอนที่ Claude Code กำลังรัน MCP server อยู่
+//
+//  Claude Code ถือ ProjectManagementMcp.dll เปิดไว้ตลอด session ทำให้ build
+//  ทับไม่ได้ ("file is locked by .NET Host") แปลว่าแก้โค้ดใน mcp/ แล้วจะยืนยัน
+//  ไม่ได้เลยจนกว่าจะปิด Claude Code — ซึ่งไม่ใช่ workflow ที่ใช้ได้จริง
+//
+//  ทางออก: build ด้วยชื่อ assembly อื่นแล้วชี้มาที่ตัวนั้น
+//
+//      dotnet build mcp -c Release -p:AssemblyName=ProjectManagementMcpVerify
+//      PM_MCP_DLL=mcp/bin/Release/net10.0/ProjectManagementMcpVerify.dll \
+//        node scripts/verify-mcp.mjs
+//
+//  CI ไม่ต้องใช้ — ที่นั่นไม่มีใครถือไฟล์อยู่
+// ═══════════════════════════════════════════════════════════════════════════
+const DLL = process.env.PM_MCP_DLL
+  ? (process.env.PM_MCP_DLL.match(/^([A-Za-z]:|\/)/) ? process.env.PM_MCP_DLL : join(ROOT, process.env.PM_MCP_DLL))
+  : join(ROOT, 'mcp', 'bin', 'Release', 'net10.0', 'ProjectManagementMcp.dll')
 
 const C = { red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m', dim: '\x1b[2m', off: '\x1b[0m' }
 
@@ -163,18 +181,40 @@ try {
 
   check(`ค้นเจอ tool ${tools.length} ตัว`, tools.length > 0, JSON.stringify(list.error))
 
-  const expected = ['complete_task', 'create_project', 'create_task', 'get_task',
-                    'list_projects', 'list_tasks', 'update_task']
+  // ═════════════════════════════════════════════════════════════════════
+  //  tool ที่ต้องมี — และ "ต้องไม่มี"
+  //
+  //  จำนวน tool ถูกคุมไว้โดยเจตนา: schema ของทุกตัวอยู่ใน system prompt ของ
+  //  ทุก session ในโฟลเดอร์นี้ตลอดไป และ tool คล้ายกันหลายตัวทำให้โมเดล
+  //  เลือกผิดบ่อยขึ้น เทสจึงล็อกทั้งสองด้าน ไม่ใช่แค่ด้าน "มีครบ"
+  // ═════════════════════════════════════════════════════════════════════
+  const expected = ['create_page', 'delete_page', 'find_pages', 'get_page',
+                    'restore_page', 'update_page']
   for (const name of expected) {
     check(`มี tool ${name}`, names.includes(name), `ที่เจอ: ${names.join(', ')}`)
   }
 
+  check('ไม่มี tool เกินจากที่ประกาศไว้ (คุมขนาด system prompt)',
+    names.length === expected.length,
+    `ที่เจอ: ${names.join(', ')}`)
+
+  // ⚠️ ลบถาวรต้องไม่อยู่ในมือ AI — เป็นการตัดสินใจเรื่องความปลอดภัย ไม่ใช่ ergonomics
+  check('ไม่มี tool ลบถาวร (purge) ให้ AI',
+    !names.some((n) => n.includes('purge')), names.join(', '))
+
   // schema ที่ผิดทำให้ client เรียก tool ไม่ได้เลย ทั้งที่ tool ปรากฏในรายการ
-  const createTask = tools.find((t) => t.name === 'create_task')
-  check('create_task มี inputSchema ที่ระบุ parameter ครบ',
-    createTask?.inputSchema?.properties?.projectId !== undefined &&
-    createTask?.inputSchema?.properties?.title !== undefined,
-    JSON.stringify(createTask?.inputSchema))
+  const createPage = tools.find((t) => t.name === 'create_page')
+  check('create_page มี inputSchema ที่ระบุ parameter ครบ',
+    createPage?.inputSchema?.properties?.title !== undefined &&
+    createPage?.inputSchema?.properties?.parentId !== undefined &&
+    createPage?.inputSchema?.properties?.status !== undefined,
+    JSON.stringify(createPage?.inputSchema))
+
+  const findPages = tools.find((t) => t.name === 'find_pages')
+  check('find_pages รับทั้ง query, parentId, status และ inTrash',
+    ['query', 'parentId', 'status', 'inTrash']
+      .every((p) => findPages?.inputSchema?.properties?.[p] !== undefined),
+    JSON.stringify(findPages?.inputSchema?.properties))
 
   check('ทุก tool มีคำอธิบาย (Claude ใช้ตัดสินใจว่าจะเรียกตัวไหน)',
     tools.every((t) => typeof t.description === 'string' && t.description.length > 0),
@@ -188,46 +228,102 @@ try {
     return { isError: r.result?.isError === true, text, error: r.error }
   }
 
-  const projects = await callTool('list_projects')
-  check('list_projects ทำงาน (login + X-Workspace-Id ถูกต้อง)',
+  const projects = await callTool('find_pages')
+  check('find_pages ไม่ใส่พารามิเตอร์ = ภาพรวมโปรเจกต์ (login + X-Workspace-Id ถูกต้อง)',
     !projects.isError && projects.text.includes('โปรเจกต์ทดสอบ MCP'),
     projects.text || JSON.stringify(projects.error))
 
-  const created = await callTool('create_task', {
-    projectId, title: 'งานที่ AI สร้าง', status: 'doing',
+  const created = await callTool('create_page', {
+    parentId: projectId, title: 'งานที่ AI สร้าง', status: 'doing',
   })
-  check('create_task สร้างงานได้', !created.isError && created.text.includes('งานที่ AI สร้าง'),
+  check('create_page สร้างงานใต้โปรเจกต์ได้',
+    !created.isError && created.text.includes('งานที่ AI สร้าง'),
     created.text || JSON.stringify(created.error))
 
   const taskId = /id=([0-9a-f-]{36})/.exec(created.text)?.[1]
-  check('create_task คืน id ที่ใช้เรียก tool ต่อได้', taskId !== undefined, created.text)
+  check('create_page คืน id ที่ใช้เรียก tool ต่อได้', taskId !== undefined, created.text)
 
-  const tasks = await callTool('list_tasks', { projectId })
-  check('list_tasks เห็นงานที่เพิ่งสร้าง พร้อมสถานะ doing',
+  const tasks = await callTool('find_pages', { parentId: projectId })
+  check('find_pages ด้วย parent_id เห็นงานที่เพิ่งสร้าง พร้อมสถานะ doing',
     !tasks.isError && tasks.text.includes('งานที่ AI สร้าง') && tasks.text.includes('doing'),
     tasks.text)
 
-  if (taskId) {
-    const done = await callTool('complete_task', { taskId })
-    check('complete_task เปลี่ยนสถานะเป็น done', !done.isError && done.text.includes('เสร็จแล้ว'), done.text)
+  const topLevel = await callTool('create_page', { title: 'โปรเจกต์ที่ AI สร้างเอง' })
+  check('create_page ไม่ใส่ parent_id = สร้างโปรเจกต์ระดับบนสุด',
+    !topLevel.isError && topLevel.text.includes('สร้างโปรเจกต์แล้ว'),
+    topLevel.text || JSON.stringify(topLevel.error))
 
-    const afterDone = await callTool('list_tasks', { projectId })
+  // ─── ค้นหา: หน้าที่ AI สร้างต้องหาเจอทันที ────────────────────────────────
+  // ก่อนที่ AddAsync จะ seed แถวใน page_searches เคสนี้ล้มเสมอ เพราะแถวนั้น
+  // เกิดตอนเบราว์เซอร์ POST /projection เท่านั้น
+  const searched = await callTool('find_pages', { query: 'ที่ AI สร้าง' })
+  check('find_pages ด้วย query ค้นเจอหน้าที่ AI สร้างเอง (ไม่ต้องเปิดเบราว์เซอร์)',
+    !searched.isError && searched.text.includes('งานที่ AI สร้าง'),
+    searched.text || JSON.stringify(searched.error))
+
+  // ─── อ่านเนื้อหา ────────────────────────────────────────────────────────
+  const read = await callTool('get_page', { pageId: taskId })
+  check('get_page อ่านรายละเอียดได้', !read.isError && read.text.includes('งานที่ AI สร้าง'),
+    read.text || JSON.stringify(read.error))
+  check('get_page แยก "ยังไม่มีข้อมูล" ออกจาก "หน้าว่าง" ให้ชัด',
+    read.text.includes('ว่างจริง') || read.text.includes('ยังไม่มีข้อมูล'),
+    read.text)
+
+  if (taskId) {
+    const done = await callTool('update_page', { pageId: taskId, status: 'done' })
+    check('update_page เปลี่ยนสถานะเป็น done', !done.isError && done.text.includes('done'), done.text)
+
+    const afterDone = await callTool('find_pages', { parentId: projectId })
     check('งานที่เสร็จแล้วถูกซ่อนตามค่าเริ่มต้น',
       !afterDone.text.includes('งานที่ AI สร้าง'), afterDone.text)
 
-    const withDone = await callTool('list_tasks', { projectId, includeDone: true })
+    const withDone = await callTool('find_pages', { parentId: projectId, includeDone: true })
     check('include_done=true แล้วเห็นอีกครั้ง', withDone.text.includes('งานที่ AI สร้าง'), withDone.text)
+
+    const cleared = await callTool('update_page', { pageId: taskId, clearStatus: true })
+    check('clear_status=true ทำให้กลับเป็นหน้าปกติที่ไม่ใช่งาน',
+      !cleared.isError && cleared.text.includes('ไม่ใช่งาน'), cleared.text)
   }
+
+  // ─── ย้าย / ลบ / กู้คืน ──────────────────────────────────────────────────
+  console.log(`\n${C.yellow}── จัดการโครงสร้าง ──${C.off}`)
+
+  const moved = await callTool('update_page', { pageId: taskId, moveToTopLevel: true })
+  check('update_page ย้ายหน้าขึ้นระดับบนสุดได้', !moved.isError && moved.text.includes('ย้ายแล้ว'),
+    moved.text || JSON.stringify(moved.error))
+
+  const deleted = await callTool('delete_page', { pageId: taskId })
+  check('delete_page ย้ายไปถังขยะได้', !deleted.isError && deleted.text.includes('ถังขยะ'),
+    deleted.text || JSON.stringify(deleted.error))
+
+  const trash = await callTool('find_pages', { inTrash: true })
+  check('find_pages in_trash=true เห็นหน้าที่ถูกลบ',
+    !trash.isError && trash.text.includes('งานที่ AI สร้าง'),
+    trash.text || JSON.stringify(trash.error))
+
+  const restored = await callTool('restore_page', { pageId: taskId })
+  check('restore_page กู้คืนได้', !restored.isError && restored.text.includes('กู้คืนแล้ว'),
+    restored.text || JSON.stringify(restored.error))
 
   // ─── error ต้องกลับไปเป็นข้อความที่ Claude อ่านรู้เรื่อง ไม่ใช่ crash ──────
   console.log(`\n${C.yellow}── การจัดการ error ──${C.off}`)
 
-  const badStatus = await callTool('update_task', { taskId, status: 'ยังไม่เริ่ม' })
+  const badStatus = await callTool('update_page', { pageId: taskId, status: 'ยังไม่เริ่ม' })
   check('สถานะที่ไม่มีในระบบ → ข้อความบอกค่าที่ถูกต้อง ไม่ใช่ crash',
     badStatus.text.includes('todo') && badStatus.text.includes('done'),
     badStatus.text || JSON.stringify(badStatus.error))
 
-  const missing = await callTool('get_task', { taskId: '00000000-0000-0000-0000-000000000000' })
+  const conflicting = await callTool('update_page', {
+    pageId: taskId, status: 'todo', clearStatus: true,
+  })
+  check('สั่งขัดกันเอง (status + clear_status) → บอกให้เลือกอย่างเดียว',
+    conflicting.text.includes('เลือกอย่างเดียว'), conflicting.text)
+
+  const nothing = await callTool('update_page', { pageId: taskId })
+  check('ไม่ระบุอะไรให้เปลี่ยน → บอกว่าต้องระบุอะไรบ้าง',
+    nothing.text.includes('ไม่มีอะไรให้เปลี่ยน'), nothing.text)
+
+  const missing = await callTool('get_page', { pageId: '00000000-0000-0000-0000-000000000000' })
   check('หน้าที่ไม่มีอยู่ → error ที่อ่านรู้เรื่อง',
     (missing.text + JSON.stringify(missing.error)).length > 0, '(ไม่ได้อะไรกลับมาเลย)')
 

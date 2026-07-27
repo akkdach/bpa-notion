@@ -245,4 +245,35 @@ public sealed class PmClient(IConfiguration configuration)
         Guid pageId, string? title, string? icon, string? status, CancellationToken ct)
         => SendAsync<PageDto>(HttpMethod.Patch, $"/api/v1/pages/{pageId}",
             new { title, icon, status }, ct);
+
+    /// <summary>เนื้อหาหน้าเป็น plain text (projection ที่เบราว์เซอร์แกะจาก Y.Doc)</summary>
+    public Task<PageContent> GetContentAsync(Guid pageId, CancellationToken ct)
+        => SendAsync<PageContent>(HttpMethod.Get, $"/api/v1/pages/{pageId}/content", null, ct);
+
+    /// <summary>ค้นหาด้วย PGroonga — เซิร์ฟเวอร์ escape อักขระพิเศษให้แล้ว</summary>
+    public Task<SearchResult> SearchAsync(
+        string query, string? status, int limit, CancellationToken ct)
+    {
+        var path = $"/api/v1/search?q={Uri.EscapeDataString(query)}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(status)) path += $"&status={Uri.EscapeDataString(status)}";
+
+        return SendAsync<SearchResult>(HttpMethod.Get, path, null, ct);
+    }
+
+    /// <summary>ย้ายหน้าพร้อมลูกหลาน — parentId = null คือย้ายขึ้นระดับบนสุด</summary>
+    public Task<MoveResult> MovePageAsync(
+        Guid pageId, Guid? parentId, Guid? afterPageId, CancellationToken ct)
+        => SendAsync<MoveResult>(HttpMethod.Post, $"/api/v1/pages/{pageId}/move",
+            new { parentId, afterPageId }, ct);
+
+    /// <summary>ย้ายไปถังขยะพร้อมลูกหลาน — คืนจำนวนหน้าที่ถูกลบ</summary>
+    public Task<int> DeletePageAsync(Guid pageId, CancellationToken ct)
+        => SendAsync<int>(HttpMethod.Delete, $"/api/v1/pages/{pageId}", null, ct);
+
+    /// <summary>กู้คืนจากถังขยะพร้อมลูกหลาน — คืนจำนวนหน้าที่กู้</summary>
+    public Task<int> RestorePageAsync(Guid pageId, CancellationToken ct)
+        => SendAsync<int>(HttpMethod.Post, $"/api/v1/pages/{pageId}/restore", null, ct);
+
+    public Task<List<PageNode>> GetTrashAsync(CancellationToken ct)
+        => SendAsync<List<PageNode>>(HttpMethod.Get, "/api/v1/pages/trash", null, ct);
 }
