@@ -276,4 +276,13 @@ public sealed class PmClient(IConfiguration configuration)
 
     public Task<List<PageNode>> GetTrashAsync(CancellationToken ct)
         => SendAsync<List<PageNode>>(HttpMethod.Get, "/api/v1/pages/trash", null, ct);
+
+    /// <summary>บันทึกบนหน้า เรียงเก่าไปใหม่</summary>
+    public Task<List<PageNote>> GetNotesAsync(Guid pageId, CancellationToken ct)
+        => SendAsync<List<PageNote>>(HttpMethod.Get, $"/api/v1/pages/{pageId}/notes", null, ct);
+
+    /// <summary>เขียนบันทึกต่อท้ายหน้า — ต้องมีสิทธิ์แสดงความเห็นขึ้นไป</summary>
+    public Task<PageNote> AddNoteAsync(Guid pageId, string body, CancellationToken ct)
+        => SendAsync<PageNote>(HttpMethod.Post, $"/api/v1/pages/{pageId}/notes",
+            new { body }, ct);
 }

@@ -129,7 +129,12 @@ public class PageTreeService(
             ? PageAcl.ForWorkspace(workspaceId, page.Id, PageRole.Editor, userId)
             : null;
 
-        await pages.AddAsync(page, acl, ct);
+        var activity = ActivityEntry.Build(
+            workspaceId, page.Id, page.Title, userId, ActivityAction.PageCreated,
+            ("parentId", page.ParentId),
+            ("status", ActivityEntry.StatusOrNone(page.Status)));
+
+        await pages.AddAsync(page, acl, activity, ct);
 
         logger.LogInformation(
             "สร้างหน้า {PageId} ใต้ {ParentId} depth={Depth}",
@@ -148,16 +153,43 @@ public class PageTreeService(
         var page = await pages.GetAsync(pageId, ct);
         if (page is null) return PageNotFound;
 
+        var userId = tenant.RequireUserId();
+        var workspaceId = tenant.RequireWorkspaceId();
+
+        // ─────────────────────────────────────────────────────────────────
+        //  ตรวจสถานะก่อนเขียนอะไรเลย
+        //
+        //  ⚠️ ลำดับนี้สำคัญ: คำขอเดียวเปลี่ยนได้หลายอย่าง และแต่ละอย่างเป็น
+        //     ธุรกรรมของตัวเอง ถ้า validate สถานะทีหลังแล้วมันผิด ชื่อกับไอคอน
+        //     จะถูกเขียนไปแล้วทั้งที่คำขอตอบ 400 = แก้ไปครึ่ง ๆ กลาง ๆ
+        // ─────────────────────────────────────────────────────────────────
+        string? newStatus = null;
+        if (request.Status is not null)
+        {
+            var parsed = ParseStatus(request.Status);
+            if (parsed.IsFailure) return parsed.Error;
+            newStatus = parsed.Value;
+        }
+
         if (request.Title is not null)
         {
-            await pages.UpdateTitleAsync(pageId, request.Title.Trim(), tenant.RequireUserId(), ct);
-            page.Title = request.Title.Trim();
+            var title = request.Title.Trim();
+
+            await pages.UpdateTitleAsync(pageId, title, userId,
+                ActivityEntry.Build(workspaceId, pageId, title, userId,
+                    ActivityAction.PageRenamed,
+                    ("from", page.Title), ("to", title)), ct);
+
+            page.Title = title;
         }
 
         if (request.Icon is not null || request.CoverUrl is not null)
         {
-            await pages.UpdateIconAsync(
-                pageId, request.Icon, request.CoverUrl, tenant.RequireUserId(), ct);
+            await pages.UpdateIconAsync(pageId, request.Icon, request.CoverUrl, userId,
+                ActivityEntry.Build(workspaceId, pageId, page.Title, userId,
+                    ActivityAction.IconChanged,
+                    ("from", page.Icon), ("to", request.Icon)), ct);
+
             page.Icon = request.Icon;
             page.CoverUrl = request.CoverUrl;
         }
@@ -165,11 +197,20 @@ public class PageTreeService(
         // สถานะงาน — "" (สตริงว่าง) = ล้างสถานะ, null = ไม่แตะ
         if (request.Status is not null)
         {
-            var parsed = ParseStatus(request.Status);
-            if (parsed.IsFailure) return parsed.Error;
+            // เขียนประวัติเฉพาะเมื่อค่าเปลี่ยนจริง — การกด chip วนกลับมาที่เดิม
+            // หรือ client ส่งค่าซ้ำ ไม่ควรทำให้ฟีดกิจกรรมเต็มไปด้วยแถวที่ไม่มีอะไรเกิด
+            var changed = page.Status != newStatus;
 
-            await pages.UpdateStatusAsync(pageId, parsed.Value, tenant.RequireUserId(), ct);
-            page.Status = parsed.Value;
+            await pages.UpdateStatusAsync(pageId, newStatus, userId,
+                changed
+                    ? ActivityEntry.Build(workspaceId, pageId, page.Title, userId,
+                        ActivityAction.StatusChanged,
+                        ("from", ActivityEntry.StatusOrNone(page.Status)),
+                        ("to", ActivityEntry.StatusOrNone(newStatus)))
+                    : null,
+                ct);
+
+            page.Status = newStatus;
         }
 
         return page.ToDto(role.Value);
@@ -284,7 +325,13 @@ public class PageTreeService(
             OldDepth: page.Depth,
             NewRank: FractionalIndex.Between(before, after),
             OldAccessRootId: page.AccessRootId,
-            NewAccessRootId: newAccessRoot), aclToAdd, ct);
+            NewAccessRootId: newAccessRoot),
+            aclToAdd,
+            ActivityEntry.Build(
+                tenant.RequireWorkspaceId(), pageId, page.Title, tenant.RequireUserId(),
+                ActivityAction.PageMoved,
+                ("fromParentId", page.ParentId), ("toParentId", request.ParentId)),
+            ct);
 
         logger.LogInformation(
             "ย้ายหน้า {PageId} จาก depth {OldDepth} ไป {NewDepth} — ลูกหลาน {Affected} หน้า",
@@ -305,7 +352,16 @@ public class PageTreeService(
         if (role is null) return PageNotFound;
         if (!role.Value.CanEdit()) return NoEditPermission;
 
-        var affected = await pages.SoftDeleteSubtreeAsync(pageId, ct);
+        // อ่านชื่อไว้ก่อนลบ — เก็บลงประวัติเพื่อให้ตอบได้ว่า "ใครลบหน้าชื่ออะไร"
+        // แม้หน้านั้นจะถูกลบถาวรไปแล้วในภายหลัง
+        var page = await pages.GetAsync(pageId, ct);
+        if (page is null) return PageNotFound;
+
+        var affected = await pages.SoftDeleteSubtreeAsync(pageId,
+            ActivityEntry.Build(
+                tenant.RequireWorkspaceId(), pageId, page.Title, tenant.RequireUserId(),
+                ActivityAction.PageDeleted,
+                ("status", ActivityEntry.StatusOrNone(page.Status))), ct);
 
         logger.LogInformation("ลบหน้า {PageId} พร้อมลูกหลาน รวม {Affected} หน้า", pageId, affected);
 
@@ -339,7 +395,15 @@ public class PageTreeService(
             }
         }
 
-        var affected = await pages.RestoreSubtreeAsync(pageId, ct);
+        // ⚠️ ประวัติไม่เก็บชุด deleted_at เดิมของลูกหลาน จึง "ย้อน restore ไม่ได้"
+        //    RestoreSubtreeAsync กู้ทั้ง subtree แบบไม่มีเงื่อนไข รวมลูกที่ถูกลบไป
+        //    ก่อนหน้านั้นแล้ว — การลบซ้ำจึงกู้ความต่างนั้นคืนไม่ได้
+        //    ปุ่มย้อนกลับบนฟีดกิจกรรมจึงรองรับแค่การเปลี่ยนสถานะ (ดู S5 ในแผน)
+        var affected = await pages.RestoreSubtreeAsync(pageId,
+            ActivityEntry.Build(
+                tenant.RequireWorkspaceId(), pageId, page.Title, tenant.RequireUserId(),
+                ActivityAction.PageRestored), ct);
+
         return affected;
     }
 

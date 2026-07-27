@@ -116,12 +116,15 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
     //     body ว่างเป็นค่าที่ถูกต้อง: หน้าที่เพิ่งสร้างยังไม่มีเนื้อหาจริง ๆ
     //     ส่วน title มาจากผู้สร้าง เบราว์เซอร์จะทับด้วยบรรทัดแรกของเอกสารทีหลัง
     // ═══════════════════════════════════════════════════════════════════════
-    public Task<Page> AddAsync(Page page, PageAcl? acl = null, CancellationToken ct = default)
+    public Task<Page> AddAsync(
+        Page page, PageAcl? acl = null, ActivityLog? activity = null,
+        CancellationToken ct = default)
         => db.InTransactionAsync(async token =>
         {
             db.Pages.Add(page);
 
             if (acl is not null) db.PageAcls.Add(acl);
+            if (activity is not null) db.ActivityLogs.Add(activity);
 
             db.PageSearches.Add(new PageSearch
             {
@@ -137,37 +140,79 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
             return page;
         }, ct);
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  แก้ field เดียว + เขียนประวัติ
+    //
+    //  ⚠️ ExecuteUpdateAsync กับ SaveChangesAsync เป็นสองคำสั่งแยกกัน จึงต้องมี
+    //     ธุรกรรมครอบเมื่อมี activity ไม่งั้นประวัติกับข้อมูลหลุดจากกันได้
+    //
+    //     เมื่อไม่มี activity ก็ไม่เปิดธุรกรรม — คำสั่งเดียวเป็น atomic อยู่แล้ว
+    //     และการเปิดธุรกรรมเปล่า ๆ ทุกครั้งเป็นค่าใช้จ่ายที่ไม่ได้อะไรกลับมา
+    // ═══════════════════════════════════════════════════════════════════════
+    private Task WithActivityAsync(
+        Func<CancellationToken, Task> mutate, ActivityLog? activity, CancellationToken ct)
+    {
+        if (activity is null) return mutate(ct);
+
+        return db.InTransactionAsync(async token =>
+        {
+            await mutate(token);
+            db.ActivityLogs.Add(activity);
+            await db.SaveChangesAsync(token);
+        }, ct);
+    }
+
+    /// <summary>รุ่นที่คืนค่า — ใช้กับ mutation ที่บอกจำนวนแถวที่กระทบ</summary>
+    private Task<T> WithActivityAsync<T>(
+        Func<CancellationToken, Task<T>> mutate, ActivityLog? activity, CancellationToken ct)
+    {
+        if (activity is null) return mutate(ct);
+
+        return db.InTransactionAsync(async token =>
+        {
+            var result = await mutate(token);
+            db.ActivityLogs.Add(activity);
+            await db.SaveChangesAsync(token);
+            return result;
+        }, ct);
+    }
+
     public Task UpdateTitleAsync(
-        Guid pageId, string title, Guid editorId, CancellationToken ct = default)
-        => db.Pages
+        Guid pageId, string title, Guid editorId, ActivityLog? activity = null,
+        CancellationToken ct = default)
+        => WithActivityAsync(token => db.Pages
              .Where(p => p.Id == pageId)
              .ExecuteUpdateAsync(s => s
                  .SetProperty(p => p.Title, title)
                  .SetProperty(p => p.LastEditedBy, editorId)
-                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
+                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), token),
+            activity, ct);
 
     // เดิม method นี้ไม่เซ็ต LastEditedBy ต่างจาก UpdateTitle/UpdateStatus ที่เซ็ต
     // ผลคือแก้ไอคอนแล้ว updated_at ขยับแต่ last_edited_by ยังเป็นคนก่อนหน้า
     // = ประวัติที่โกหกแบบเงียบ ๆ ซึ่งแย่กว่าไม่มีประวัติเลย
     public Task UpdateIconAsync(
         Guid pageId, string? icon, string? coverUrl, Guid editorId,
-        CancellationToken ct = default)
-        => db.Pages
+        ActivityLog? activity = null, CancellationToken ct = default)
+        => WithActivityAsync(token => db.Pages
              .Where(p => p.Id == pageId)
              .ExecuteUpdateAsync(s => s
                  .SetProperty(p => p.Icon, icon)
                  .SetProperty(p => p.CoverUrl, coverUrl)
                  .SetProperty(p => p.LastEditedBy, editorId)
-                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
+                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), token),
+            activity, ct);
 
     public Task UpdateStatusAsync(
-        Guid pageId, string? status, Guid editorId, CancellationToken ct = default)
-        => db.Pages
+        Guid pageId, string? status, Guid editorId, ActivityLog? activity = null,
+        CancellationToken ct = default)
+        => WithActivityAsync(token => db.Pages
              .Where(p => p.Id == pageId)
              .ExecuteUpdateAsync(s => s
                  .SetProperty(p => p.Status, status)
                  .SetProperty(p => p.LastEditedBy, editorId)
-                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), ct);
+                 .SetProperty(p => p.UpdatedAt, DateTimeOffset.UtcNow), token),
+            activity, ct);
 
     // ═══════════════════════════════════════════════════════════════════════
     //  ย้าย subtree — UPDATE เดียวสำหรับลูกหลานทั้งหมด
@@ -180,11 +225,14 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
     //  ด้วยชุดใหม่ แล้วเก็บส่วนที่เหลือ (ซึ่งเริ่มด้วยตัวหน้าที่ย้ายเอง) ไว้
     // ═══════════════════════════════════════════════════════════════════════
     public Task<int> MoveSubtreeAsync(
-        MoveSubtreeCommand command, PageAcl? aclToAdd = null, CancellationToken ct = default)
+        MoveSubtreeCommand command, PageAcl? aclToAdd = null, ActivityLog? activity = null,
+        CancellationToken ct = default)
         => db.InTransactionAsync(async token =>
         {
             // ─────────────────────────────────────────────────────────────
-            //  0) ACL ที่ต้องเกิดพร้อมการย้าย (ย้ายขึ้นระดับบนสุดโดยไม่มี ACL เดิม)
+            //  0) ACL + ประวัติ ที่ต้องเกิดพร้อมการย้าย
+            //
+            //  ACL: ใช้ตอนย้ายขึ้นระดับบนสุดโดยที่หน้านั้นยังไม่มี ACL ของตัวเอง
             //
             //  ⚠️ ต้องอยู่ใน transaction เดียวกับการย้าย เดิม service เรียก
             //     AddAclAsync ก่อนแล้วค่อยเรียก method นี้ ซึ่ง AddAclAsync มี
@@ -194,10 +242,16 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
             //     ที่ให้สิทธิ์แก้กับทุกคนใน workspace โดยไม่มีใครสั่ง
             //     นี่คือการมอบสิทธิ์แบบเงียบ ๆ ไม่ใช่แค่แถวขยะ และ AI ที่ retry
             //     การย้ายที่ล้มจะสร้างมันซ้ำได้เรื่อย ๆ
+            //
+            //  ⚠️ SaveChanges ต้องเรียกเมื่อ "ตัวใดตัวหนึ่ง" มีค่า ไม่ใช่เฉพาะตอนมี ACL
+            //     เคยเขียนผิดเป็นเช็คแค่ aclToAdd แล้วแถวประวัติของการย้ายที่ไม่ต้อง
+            //     สร้าง ACL หายไปทั้งหมดแบบเงียบ ๆ
             // ─────────────────────────────────────────────────────────────
-            if (aclToAdd is not null)
+            if (aclToAdd is not null) db.PageAcls.Add(aclToAdd);
+            if (activity is not null) db.ActivityLogs.Add(activity);
+
+            if (aclToAdd is not null || activity is not null)
             {
-                db.PageAcls.Add(aclToAdd);
                 await db.SaveChangesAsync(token);
             }
 
@@ -258,27 +312,31 @@ public class PageRepository(AppDbContext db, IScopedSql sql) : IPageRepository
     //  ลบ / กู้คืน — ทำกับ subtree ทั้งก้อนเสมอ
     // ═══════════════════════════════════════════════════════════════════════
 
-    public Task<int> SoftDeleteSubtreeAsync(Guid pageId, CancellationToken ct = default)
-        => sql.ExecuteAsync("""
+    public Task<int> SoftDeleteSubtreeAsync(
+        Guid pageId, ActivityLog? activity = null, CancellationToken ct = default)
+        => WithActivityAsync(token => sql.ExecuteAsync("""
             UPDATE pages
                SET deleted_at = now(), updated_at = now()
              WHERE workspace_id = @__ws
                AND deleted_at IS NULL
                AND (id = @pageId OR ancestor_ids @> ARRAY[@pageId]::uuid[])
             """,
-            p => p.Add(new NpgsqlParameter("pageId", NpgsqlDbType.Uuid) { Value = pageId }), ct);
+            p => p.Add(new NpgsqlParameter("pageId", NpgsqlDbType.Uuid) { Value = pageId }), token),
+            activity, ct);
 
-    public Task<int> RestoreSubtreeAsync(Guid pageId, CancellationToken ct = default)
+    public Task<int> RestoreSubtreeAsync(
+        Guid pageId, ActivityLog? activity = null, CancellationToken ct = default)
         // ⚠️ กู้คืนได้เฉพาะเมื่อ parent ยังอยู่ ไม่งั้นจะได้หน้ากำพร้าที่มองไม่เห็น
         //    ใน sidebar (parent_id ชี้ไปหน้าที่ยังอยู่ในถังขยะ)
-        => sql.ExecuteAsync("""
+        => WithActivityAsync(token => sql.ExecuteAsync("""
             UPDATE pages
                SET deleted_at = NULL, updated_at = now()
              WHERE workspace_id = @__ws
                AND deleted_at IS NOT NULL
                AND (id = @pageId OR ancestor_ids @> ARRAY[@pageId]::uuid[])
             """,
-            p => p.Add(new NpgsqlParameter("pageId", NpgsqlDbType.Uuid) { Value = pageId }), ct);
+            p => p.Add(new NpgsqlParameter("pageId", NpgsqlDbType.Uuid) { Value = pageId }), token),
+            activity, ct);
 
     public Task<int> PurgeSubtreeAsync(Guid pageId, CancellationToken ct = default)
         // page_doc_updates / page_doc_snapshots / page_searches หายตาม

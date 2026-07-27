@@ -188,12 +188,13 @@ public static class TaskTools
     });
 
     [McpServerTool(Name = "get_page")]
-    [Description("ดูรายละเอียดหน้าหนึ่งจาก id — สถานะ, หน้าแม่, งานลูกที่อยู่ข้างใต้ " +
-                 "และเนื้อหาของหน้า (include_content=true ซึ่งเป็นค่าเริ่มต้น)")]
+    [Description("ดูรายละเอียดหน้าหนึ่งจาก id — สถานะ, หน้าแม่, งานลูกที่อยู่ข้างใต้, " +
+                 "เนื้อหาของหน้า และบันทึกความคืบหน้าที่เคยเขียนไว้")]
     public static Task<string> GetPage(
         PmClient client,
         [Description("id ของหน้า/งาน")] Guid pageId,
         [Description("อ่านเนื้อหาของหน้าด้วยไหม (ค่าเริ่มต้น true)")] bool includeContent = true,
+        [Description("อ่านบันทึกความคืบหน้าด้วยไหม (ค่าเริ่มต้น true)")] bool includeNotes = true,
         CancellationToken ct = default) => Run(async () =>
     {
         var page = await client.GetPageAsync(pageId, ct);
@@ -249,6 +250,23 @@ public static class TaskTools
                     sb.AppendLine();
                     sb.AppendLine($"⚠️ หน้าถูกแก้ล่าสุด {content.PageUpdatedAt:yyyy-MM-dd HH:mm} " +
                                   "ซึ่งใหม่กว่าข้อความข้างบน — ข้อความอาจไม่ใช่ฉบับล่าสุด");
+                }
+            }
+        }
+
+        if (includeNotes)
+        {
+            var notes = await client.GetNotesAsync(pageId, ct);
+
+            if (notes.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"บันทึกความคืบหน้า ({notes.Count}):");
+                foreach (var n in notes)
+                {
+                    var who = n.AuthorKind == "agent" ? "🤖" : "👤";
+                    sb.AppendLine($"  {who} {n.AuthorName ?? "(ไม่ทราบ)"} · {n.CreatedAt:yyyy-MM-dd HH:mm}");
+                    sb.AppendLine($"     {n.Body.ReplaceLineEndings("\n     ")}");
                 }
             }
         }
@@ -345,6 +363,20 @@ public static class TaskTools
         return affected > 1
             ? $"ย้ายไปถังขยะแล้ว {affected} หน้า (รวมลูกหลาน) — กู้คืนได้ด้วย restore_page id={pageId}"
             : $"ย้ายไปถังขยะแล้ว — กู้คืนได้ด้วย restore_page id={pageId}";
+    });
+
+    [McpServerTool(Name = "add_note")]
+    [Description("เขียนบันทึกความคืบหน้าต่อท้ายหน้า — ใช้รายงานสิ่งที่ทำไป ตั้งคำถาม " +
+                 "หรือสรุปให้เจ้าของอ่าน. บันทึกต่อท้ายอย่างเดียว แก้หรือลบไม่ได้. " +
+                 "นี่คือวิธีเดียวที่เขียนข้อความลงในระบบได้ — เนื้อหาของหน้าเองแก้ไม่ได้")]
+    public static Task<string> AddNote(
+        PmClient client,
+        [Description("id ของหน้า/งานที่จะเขียนบันทึกใส่")] Guid pageId,
+        [Description("ข้อความ (ไม่เกิน 4000 ตัวอักษร)")] string body,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        var note = await client.AddNoteAsync(pageId, body, ct);
+        return $"เขียนบันทึกแล้วเมื่อ {note.CreatedAt:yyyy-MM-dd HH:mm}  หน้า id={pageId}";
     });
 
     [McpServerTool(Name = "restore_page")]

@@ -300,6 +300,12 @@ jobs:
       - name: verify-search (ค้นไทยกลางคำ + อ่านเนื้อหาหน้า)
         run: node scripts/verify-search.mjs "$API_BASE"
 
+      # ⚠️ เคสสำคัญ: ลบถาวรหน้าที่มีประวัติแล้วประวัติต้องยังอยู่
+      #    FK เป็น ON DELETE SET NULL (page_id) — ถ้าเป็น SET NULL เปล่า ๆ
+      #    จะ null ทั้ง (workspace_id, page_id) แล้ว purge จะล้มทั้งคำสั่ง
+      - name: verify-activity (ฟีดกิจกรรม + บันทึก + แยก AI จากคน)
+        run: node scripts/verify-activity.mjs "$API_BASE"
+
       - name: verify-repair (ทำ ancestor_ids/access_root_id เพี้ยนแล้วซ่อม)
         run: node scripts/verify-repair.mjs "$API_BASE"
 

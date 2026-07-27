@@ -59,6 +59,17 @@ public sealed record PageContent(
 /// <param name="AffectedDescendants">จำนวนลูกหลานที่ถูกอัปเดตไปพร้อมกัน</param>
 public sealed record MoveResult(PageDto Page, int AffectedDescendants);
 
+/// <summary>บันทึกบนหน้า — ผลของ GET/POST /api/v1/pages/{id}/notes</summary>
+/// <param name="AuthorKind">"human" / "agent" — บอกว่าบันทึกนี้คนเขียนหรือ AI เขียน</param>
+public sealed record PageNote(
+    Guid Id,
+    Guid PageId,
+    Guid? AuthorUserId,
+    string? AuthorName,
+    string? AuthorKind,
+    string Body,
+    DateTimeOffset CreatedAt);
+
 /// <summary>ผลค้นหา — ผลของ GET /api/v1/search</summary>
 public sealed record SearchResult(
     string Query,

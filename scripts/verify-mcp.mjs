@@ -188,7 +188,7 @@ try {
   //  ทุก session ในโฟลเดอร์นี้ตลอดไป และ tool คล้ายกันหลายตัวทำให้โมเดล
   //  เลือกผิดบ่อยขึ้น เทสจึงล็อกทั้งสองด้าน ไม่ใช่แค่ด้าน "มีครบ"
   // ═════════════════════════════════════════════════════════════════════
-  const expected = ['create_page', 'delete_page', 'find_pages', 'get_page',
+  const expected = ['add_note', 'create_page', 'delete_page', 'find_pages', 'get_page',
                     'restore_page', 'update_page']
   for (const name of expected) {
     check(`มี tool ${name}`, names.includes(name), `ที่เจอ: ${names.join(', ')}`)
@@ -284,6 +284,25 @@ try {
     check('clear_status=true ทำให้กลับเป็นหน้าปกติที่ไม่ใช่งาน',
       !cleared.isError && cleared.text.includes('ไม่ใช่งาน'), cleared.text)
   }
+
+  // ─── บันทึกความคืบหน้า ──────────────────────────────────────────────────
+  // ช่องเดียวที่ AI เขียนข้อความลงระบบได้ โดยไม่ต้องแตะ Yjs
+  console.log(`\n${C.yellow}── บันทึกความคืบหน้า ──${C.off}`)
+
+  const noteBody = 'ตรวจสอบยอดขายไตรมาสสามแล้ว พบว่าข้อมูลเดือนกันยายนยังไม่ครบ'
+  const noted = await callTool('add_note', { pageId: taskId, body: noteBody })
+  check('add_note เขียนบันทึกได้', !noted.isError && noted.text.includes('เขียนบันทึกแล้ว'),
+    noted.text || JSON.stringify(noted.error))
+
+  const withNotes = await callTool('get_page', { pageId: taskId })
+  check('get_page แสดงบันทึกที่เพิ่งเขียน',
+    withNotes.text.includes(noteBody), withNotes.text)
+  check('บันทึกบอกว่าใครเขียน (คนหรือ AI)',
+    withNotes.text.includes('👤') || withNotes.text.includes('🤖'), withNotes.text)
+
+  const emptyNote = await callTool('add_note', { pageId: taskId, body: '   ' })
+  check('บันทึกว่างเปล่า → ข้อความบอกเหตุผล ไม่ใช่ crash',
+    emptyNote.text.includes('ว่างเปล่า'), emptyNote.text)
 
   // ─── ย้าย / ลบ / กู้คืน ──────────────────────────────────────────────────
   console.log(`\n${C.yellow}── จัดการโครงสร้าง ──${C.off}`)

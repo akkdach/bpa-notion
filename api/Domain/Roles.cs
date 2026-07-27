@@ -142,4 +142,20 @@ public static class RoleExtensions
     /// <summary>สิทธิ์ที่แก้เนื้อหาได้</summary>
     public static bool CanEdit(this PageRole role)
         => role is PageRole.Editor or PageRole.Full;
+
+    /// <summary>
+    /// สิทธิ์ที่เขียนบันทึก/ความคิดเห็นบนหน้าได้ แต่ไม่จำเป็นต้องแก้เนื้อหาหน้าได้
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ นี่คือ caller แรกของ PageRole.Commenter ในระบบ
+    ///
+    ///    ก่อนหน้านี้ค่านั้นมีอยู่ใน enum และใน CHECK constraint แต่**ไม่มีโค้ดไหน
+    ///    แยกมันออกจาก Viewer เลย** — ทุกทางเขียนเช็ค CanEdit() ซึ่ง commenter ไม่ผ่าน
+    ///    ผลคือ commenter ทำอะไรได้เท่ากับ viewer เป๊ะ ๆ
+    ///
+    ///    การมีบันทึกทำให้ tier นี้มีความหมายจริงเป็นครั้งแรก: คนที่ควรออกความเห็น
+    ///    ได้แต่ไม่ควรแก้เอกสาร (เช่น ผู้ตรวจ หรือ AI ที่เราอยากให้รายงานแต่ไม่ให้แก้)
+    /// </remarks>
+    public static bool CanComment(this PageRole role)
+        => role is PageRole.Commenter or PageRole.Editor or PageRole.Full;
 }

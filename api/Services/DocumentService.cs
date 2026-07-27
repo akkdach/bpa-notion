@@ -222,9 +222,20 @@ public class DocumentService(
 
         // title อยู่บน pages ด้วยเพราะ sidebar ต้องใช้ และไม่อยากให้ sidebar
         // ต้อง join page_searches
+        //
+        // ⚠️ ไม่เขียน activity ที่นี่โดยเจตนา (activity: null)
+        //
+        //    ทางนี้คือ autosave — เบราว์เซอร์ส่ง projection ทุกครั้งที่ผู้ใช้หยุดพิมพ์
+        //    2 วินาที และ title คือ "บรรทัดแรกของเอกสาร" ซึ่งเปลี่ยนไปเรื่อย ๆ ระหว่าง
+        //    พิมพ์ประโยคแรก ถ้าบันทึกประวัติทุกครั้ง ฟีดกิจกรรมจะถูกกลบด้วยการเปลี่ยน
+        //    ชื่อทีละตัวอักษรจนมองไม่เห็นสิ่งที่ AI ทำ ซึ่งเป็นเหตุผลที่ฟีดมีอยู่
+        //
+        //    ผลที่ยอมรับ: การเปลี่ยนชื่อจากการพิมพ์ในเอกสารไม่โผล่ในฟีด ต่างจากการ
+        //    เปลี่ยนชื่อผ่าน PATCH /pages/{id} (ซึ่งเป็นการกระทำที่ตั้งใจครั้งเดียว)
         if (title != page.Title)
         {
-            await pages.UpdateTitleAsync(pageId, title, tenant.RequireUserId(), ct);
+            await pages.UpdateTitleAsync(
+                pageId, title, tenant.RequireUserId(), activity: null, ct);
         }
 
         await documents.UpsertSearchProjectionAsync(

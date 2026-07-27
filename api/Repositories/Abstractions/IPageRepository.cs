@@ -29,16 +29,30 @@ public interface IPageRepository
     /// ACL ที่ต้องเกิดพร้อมหน้า — ใช้กับหน้าระดับบนสุดซึ่งเป็น access root ของตัวเอง
     /// null = หน้าลูกที่สืบทอดสิทธิ์จากพ่อ
     /// </param>
-    Task<Page> AddAsync(Page page, PageAcl? acl = null, CancellationToken ct = default);
+    /// <param name="activity">
+    /// แถวประวัติที่ต้องเกิดพร้อมกัน — ทุก method ที่เปลี่ยนข้อมูลในไฟล์นี้รับตัวนี้
+    /// เพราะประวัติต้องเขียนใน "ธุรกรรมเดียวกับการเปลี่ยนแปลง"
+    ///
+    /// ถ้าเขียนจาก service หลัง mutation สำเร็จ log จะโกหกได้สองทาง: mutation สำเร็จ
+    /// แต่ log ล้ม (ประวัติหาย) หรือ log สำเร็จแต่ mutation rollback (ประวัติบอกถึง
+    /// สิ่งที่ไม่เคยเกิด) — ทั้งคู่แย่กว่าไม่มีประวัติเลย
+    /// </param>
+    Task<Page> AddAsync(
+        Page page, PageAcl? acl = null, ActivityLog? activity = null,
+        CancellationToken ct = default);
 
-    Task UpdateTitleAsync(Guid pageId, string title, Guid editorId, CancellationToken ct = default);
+    Task UpdateTitleAsync(
+        Guid pageId, string title, Guid editorId, ActivityLog? activity = null,
+        CancellationToken ct = default);
 
     Task UpdateIconAsync(
         Guid pageId, string? icon, string? coverUrl, Guid editorId,
-        CancellationToken ct = default);
+        ActivityLog? activity = null, CancellationToken ct = default);
 
     /// <summary>เซ็ตสถานะงาน (null = ล้างสถานะ ให้กลับเป็นหน้าปกติ)</summary>
-    Task UpdateStatusAsync(Guid pageId, string? status, Guid editorId, CancellationToken ct = default);
+    Task UpdateStatusAsync(
+        Guid pageId, string? status, Guid editorId, ActivityLog? activity = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// ย้ายหน้า (พร้อมลูกหลานทั้งหมด) ไปใต้ parent ใหม่
@@ -53,12 +67,15 @@ public interface IPageRepository
     /// ไม่ได้ย้าย โดยไม่มีใครสั่ง
     /// </param>
     Task<int> MoveSubtreeAsync(
-        MoveSubtreeCommand command, PageAcl? aclToAdd = null, CancellationToken ct = default);
+        MoveSubtreeCommand command, PageAcl? aclToAdd = null, ActivityLog? activity = null,
+        CancellationToken ct = default);
 
     /// <summary>soft delete หน้าและลูกหลานทั้งหมด</summary>
-    Task<int> SoftDeleteSubtreeAsync(Guid pageId, CancellationToken ct = default);
+    Task<int> SoftDeleteSubtreeAsync(
+        Guid pageId, ActivityLog? activity = null, CancellationToken ct = default);
 
-    Task<int> RestoreSubtreeAsync(Guid pageId, CancellationToken ct = default);
+    Task<int> RestoreSubtreeAsync(
+        Guid pageId, ActivityLog? activity = null, CancellationToken ct = default);
 
     /// <summary>ลบถาวร — ใช้ตอนล้างถังขยะ</summary>
     Task<int> PurgeSubtreeAsync(Guid pageId, CancellationToken ct = default);

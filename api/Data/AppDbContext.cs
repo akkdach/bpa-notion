@@ -41,6 +41,10 @@ public class AppDbContext(
     public DbSet<PageSearch> PageSearches => Set<PageSearch>();
     public DbSet<PageLink> PageLinks => Set<PageLink>();
 
+    // ─── การทำงานร่วมกันระหว่างคนกับ AI ──────────────────────────────────
+    public DbSet<PageNote> PageNotes => Set<PageNote>();
+    public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -89,6 +93,14 @@ public class AppDbContext(
 
         modelBuilder.Entity<PageLink>()
             .HasQueryFilter(TenantFilter, l => l.WorkspaceId == CurrentWorkspaceId);
+
+        modelBuilder.Entity<PageNote>()
+            .HasQueryFilter(TenantFilter, n => n.WorkspaceId == CurrentWorkspaceId);
+
+        // ⚠️ ไม่มี SoftDeleteFilter — ประวัติต้องอ่านได้แม้หน้าถูกลบไปแล้ว
+        //    (คำถาม "ใครลบหน้านี้" ตอบได้เฉพาะเมื่อ log ไม่ถูกกรองตามหน้าที่หายไป)
+        modelBuilder.Entity<ActivityLog>()
+            .HasQueryFilter(TenantFilter, a => a.WorkspaceId == CurrentWorkspaceId);
 
         modelBuilder.Entity<WorkspaceMember>()
             .HasQueryFilter(TenantFilter, m => m.WorkspaceId == CurrentWorkspaceId);
