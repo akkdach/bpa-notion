@@ -21,21 +21,43 @@ Claude Code  ──stdio/JSON-RPC──▶  ProjectManagementMcp  ──HTTP─�
 pwsh scripts/setup-mcp.ps1
 ```
 
-สคริปต์จะ build เป็น Release แล้ว **สร้างบัญชีของ AI แยกจากบัญชีคุณ**:
+**ต้องมี API token ก่อน** — สร้างที่ เว็บ → **ตั้งค่า → การเชื่อมต่อ AI** →
+*สร้าง token* (ค่าจริงแสดงครั้งเดียว)
 
-1. ถามอีเมล/รหัสผ่าน **ของคุณ** (ต้องเป็น owner/admin) เพื่อขอสิทธิ์เชิญสมาชิก
-2. ให้เลือก workspace ที่ AI จะเข้าถึง
-3. สมัครบัญชี `claude+<slug>@<slug>.local` ด้วยรหัสผ่านสุ่ม
-4. เชิญเข้า workspace เป็น **member** แล้วทำเครื่องหมาย `kind = agent`
-5. เก็บ credential ของบัญชี AI ลง
-   [.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets)
+สคริปต์จะ:
+
+1. build เป็น Release
+2. ถาม URL ของ API แล้วให้วาง token
+3. ยิง `GET /workspaces/current` หนึ่งครั้งเพื่อยืนยันว่าใช้ได้จริง
+4. เก็บลง [.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets)
    ที่ `%APPDATA%\Microsoft\UserSecrets\` — **นอก repo**
+5. ลบค่าแบบเก่า (`Pm:Email` / `Pm:Password` / `Pm:Workspace`) ทิ้งถ้ายังค้างอยู่
+
+บัญชี agent ที่ token ทำงานแทนถูกสร้างฝั่งเซิร์ฟเวอร์เองตอนออก token ใบแรกของ
+workspace นั้น — สคริปต์ไม่ต้องรู้จักรหัสผ่านของใครอีกแล้ว
 
 จากนั้น
 
 1. เปิด API ทิ้งไว้ — `dotnet run --project api`
 2. เปิด Claude Code ใหม่ในโฟลเดอร์ `d:/Projects/notion` แล้วอนุญาต MCP server ชื่อ `projectmanagement`
 3. ตรวจด้วย `/mcp` — ต้องเห็นสถานะ connected
+
+### ทำไมเป็น token ไม่ใช่อีเมล/รหัสผ่าน
+
+รุ่นก่อนให้ MCP เก็บรหัสผ่านของบัญชี AI ไว้แล้ว login เอง ซึ่งพังสามอย่างที่
+เขียนสคริปต์ให้ดีขึ้นก็แก้ไม่ได้:
+
+- **ถอนสิทธิ์ทีละเครื่องไม่ได้** — รหัสผ่านคือใบเดียวของทั้งบัญชี
+- **ตั้งเครื่องที่สองไม่ได้** — รันสคริปต์ซ้ำเจอ `email_taken` แล้วตัน เพราะรหัสผ่าน
+  เดิมสุ่มไว้และอยู่ใน Secret Manager ของเครื่องแรกเท่านั้น
+- **ไม่รู้ว่าใบไหนยังถูกใช้อยู่** — ไม่มี `last_used_at` ให้ดู
+
+token แก้ทั้งสามข้อ: หนึ่งเครื่องหนึ่งใบ · เพิกถอนรายใบมีผลกับคำขอถัดไปทันที ·
+ฐานข้อมูลเก็บแค่ SHA-256 ค่าจริงจึงอ่านคืนไม่ได้แม้แต่จากฝั่งเซิร์ฟเวอร์
+
+การ authenticate เลือก scheme จาก prefix ของ `Authorization: Bearer` —
+ขึ้นต้นด้วย `pmt_` ไปทาง API token ที่เหลือไปทาง JWT เดิม
+(`AuthConfiguration.RouteScheme`) เว็บจึงไม่ต้องเปลี่ยนอะไรเลย
 
 ### ทำไม AI ต้องมีบัญชีของตัวเอง
 
@@ -59,9 +81,11 @@ pwsh scripts/setup-mcp.ps1
 | User Secrets | env var | ค่าเริ่มต้น |
 |---|---|---|
 | `Pm:ApiUrl` | `PM_API_URL` | `http://localhost:5081` |
-| `Pm:Email` | `PM_EMAIL` | *(จำเป็น)* — อีเมลของบัญชี **AI** ไม่ใช่ของคุณ |
-| `Pm:Password` | `PM_PASSWORD` | *(จำเป็น)* — รหัสผ่านสุ่มที่ setup-mcp ตั้งให้ |
-| `Pm:Workspace` | `PM_WORKSPACE` | ข้ามได้ถ้าบัญชีมี workspace เดียว |
+| `Pm:Token` | `PM_TOKEN` | *(จำเป็น)* — API token ที่ออกจากหน้าตั้งค่า ขึ้นต้นด้วย `pmt_` |
+
+> **ไม่มี `Pm:Workspace` แล้ว** — ขอบเขตมากับตัว token ใบหนึ่งใช้ได้กับ workspace
+> เดียวเท่านั้น จะทำงานกับอีก workspace ต้องออก token ใบใหม่ที่นั่น
+> (ส่ง `X-Workspace-Id` ชี้ไปที่อื่นจะได้ 403 `token_workspace_mismatch` ไม่ใช่เงียบ ๆ ใช้ค่าจาก token)
 
 env var มีไว้สำหรับ container / CI ที่ไม่มี secret store ส่วนบนเครื่อง dev ใช้
 User Secrets เพราะไม่ต้องตั้งใหม่ทุก shell และ **Claude Code สั่งรัน MCP server
@@ -70,7 +94,7 @@ User Secrets เพราะไม่ต้องตั้งใหม่ทุ�
 > ⚠️ `Host.CreateApplicationBuilder` โหลด Secret Manager ให้เฉพาะตอน environment
 > เป็น Development เท่านั้น MCP ถูกสั่งรันโดยไม่มี `DOTNET_ENVIRONMENT` จึงตกเป็น
 > Production — `Program.cs` จึงเรียก `AddUserSecrets` เองอย่างชัดเจน ไม่งั้น secret
-> จะหายไปเงียบ ๆ แล้วขึ้นว่า "ยังไม่ได้ตั้ง Pm:Email" ทั้งที่ตั้งไปแล้ว
+> จะหายไปเงียบ ๆ แล้วขึ้นว่า "ยังไม่ได้ตั้ง Pm:Token" ทั้งที่ตั้งไปแล้ว
 
 ## tools ที่มี
 
@@ -229,6 +253,8 @@ User Secrets ของคุณ แล้วพูด JSON-RPC กับ MCP ser
 |---|---|
 | `/mcp` ขึ้น failed | ยังไม่ได้ build — รัน `pwsh scripts/setup-mcp.ps1` |
 | `ต่อ API ไม่ได้ที่ …` | ยังไม่ได้เปิด API หรือ `Pm:ApiUrl` ผิด port (dev = 5081, container = 5080) |
-| `ยังไม่ได้ตั้ง Pm:Email` | รัน `pwsh scripts/setup-mcp.ps1` |
-| `มีหลาย workspace` | ตั้ง `Pm:Workspace` เป็น slug หรือ GUID |
+| `ยังไม่ได้ตั้ง Pm:Token` | สร้าง token ที่ ตั้งค่า → การเชื่อมต่อ AI แล้วรัน `pwsh scripts/setup-mcp.ps1` |
+| `ระบบเปลี่ยนจากการ login ด้วยรหัสผ่านมาใช้ API token แล้ว` | มี `Pm:Email`/`Pm:Password` ค้างจากรุ่นก่อน — รัน setup-mcp.ps1 ใหม่ มันลบให้เอง |
+| ทุก tool ตอบ `API 401` | token ถูกเพิกถอนหรือหมดอายุ — ดูสถานะที่ ตั้งค่า → การเชื่อมต่อ AI แล้วออกใบใหม่ |
+| `token นี้ใช้ได้กับ workspace ที่ออกให้เท่านั้น` | ใช้ token ผิด workspace — ออกใบใหม่ใน workspace ที่ต้องการ |
 | `API 500 … column p.status does not exist` | ยังไม่ได้ลง migration — `dotnet ef database update --project api` |

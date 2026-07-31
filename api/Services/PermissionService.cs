@@ -35,6 +35,27 @@ public class PermissionService(
         return role;
     }
 
+    /// <remarks>
+    /// ไม่ memo โดยเจตนา — เรียกครั้งเดียวต่อการกู้คืนหนึ่งครั้ง และการใช้ _memo
+    /// ร่วมกับตัวปกติจะทำให้คำตอบของสองคำถามที่ต่างกันปนกันภายใต้ key เดียว
+    /// </remarks>
+    public async Task<PageRole?> GetEffectiveRoleForDeletedAsync(
+        Guid pageId, CancellationToken ct = default)
+    {
+        var workspaceRole = tenant.WorkspaceRole
+            ?? throw new InvalidOperationException(
+                "ไม่มี WorkspaceRole ใน tenant context — endpoint ลืมใส่ [RequireWorkspace]");
+
+        // owner/admin ไม่เดินมาทางนี้อยู่แล้ว (ผู้เรียกลัดไปก่อน) แต่ถ้าเดินมา
+        // ก็ต้องได้คำตอบเดิม ไม่ใช่ null เพราะ PageExistsAsync มองไม่เห็นหน้าที่ถูกลบ
+        if (workspaceRole.IsWorkspaceWideEditor()) return PageRole.Full;
+
+        var grants = await queries.GetGrantsForDeletedPageAsync(
+            pageId, tenant.RequireUserId(), ct);
+
+        return Highest(grants, workspaceRole);
+    }
+
     private async Task<PageRole?> ResolveAsync(Guid pageId, CancellationToken ct)
     {
         var workspaceRole = tenant.WorkspaceRole
@@ -54,6 +75,11 @@ public class PermissionService(
         // JOIN ที่ access_root_id ทำให้ไม่ต้องไล่ขึ้น tree ทีละชั้น
         var grants = await queries.GetGrantsForPageAsync(pageId, tenant.RequireUserId(), ct);
 
+        return Highest(grants, workspaceRole);
+    }
+
+    private static PageRole? Highest(List<AclGrant> grants, WorkspaceRole workspaceRole)
+    {
         if (grants.Count == 0) return null;
 
         // guest เห็นเฉพาะหน้าที่ถูกแชร์ให้ "ตัวเขาเอง" — grant ระดับ workspace

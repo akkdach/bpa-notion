@@ -153,9 +153,10 @@ public static class TaskTools
                                .OrderBy(n => n.Rank, StringComparer.Ordinal).ToList();
 
             if (projects.Count == 0)
-                return $"[{client.WorkspaceName}] ยังไม่มีโปรเจกต์ — สร้างด้วย create_page";
+                return $"[{await client.GetWorkspaceNameAsync(ct)}] ยังไม่มีโปรเจกต์ — สร้างด้วย create_page";
 
-            var sb = new StringBuilder($"โปรเจกต์ใน workspace \"{client.WorkspaceName}\":\n");
+            var workspace = await client.GetWorkspaceNameAsync(ct);
+            var sb = new StringBuilder($"โปรเจกต์ใน workspace \"{workspace}\":\n");
             foreach (var p in projects)
             {
                 var children = live.Where(n => n.ParentId == p.Id).ToList();

@@ -10,9 +10,16 @@ namespace ProjectManagementMcp;
 // ═══════════════════════════════════════════════════════════════════════════
 //  PmClient — ตัวเชื่อม REST API ของ ProjectManagement (api/)
 //
-//  · login ครั้งเดียว cache access token ไว้ ต่ออายุอัตโนมัติเมื่อใกล้หมด
-//  · แนบ Authorization + X-Workspace-Id ให้ทุก request ที่ผูก workspace
+//  · ยืนยันตัวตนด้วย API token ใบเดียว (`pmt_…`) ไม่มีการ login ไม่มี session
 //  · แกะ envelope { success, data, message, code } ให้เหลือแค่ data
+//
+//  ⚠️ ไม่ส่ง X-Workspace-Id — ตัว token ผูกกับ workspace อยู่แล้ว เซิร์ฟเวอร์
+//     อ่านจาก token และปฏิเสธถ้า header ชี้ไปคนละที่ (token_workspace_mismatch)
+//     การไม่ส่งจึงทั้งง่ายกว่าและกันความผิดพลาดได้ในตัว
+//
+//  ⚠️ เดิมเก็บอีเมล+รหัสผ่านของบัญชี AI ไว้บนดิสก์แล้ว login เอง เปลี่ยนมาใช้
+//     token เพราะรหัสผ่านเพิกถอนรายเครื่องไม่ได้ ไม่มีวันหมดอายุ และต้องคัดลอก
+//     ส่งต่อกันเมื่อมีหลายเครื่อง
 //
 //  ทุก error โยนเป็น InvalidOperationException พร้อมข้อความไทย ซึ่ง MCP
 //  ส่งกลับให้ Claude อ่านได้ตรง ๆ
@@ -22,13 +29,35 @@ public sealed class PmClient(IConfiguration configuration)
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = new();
-    private readonly SemaphoreSlim _authLock = new(1, 1);
+    private readonly SemaphoreSlim _workspaceLock = new(1, 1);
 
-    private string? _token;
-    private DateTimeOffset _tokenExpiresAt;
-    private Guid _workspaceId;
+    private string? _workspaceName;
 
-    public string WorkspaceName { get; private set; } = "";
+    /// <summary>
+    /// ชื่อ workspace ที่ token ใบนี้ผูกอยู่ — ดึงครั้งแรกที่ถามแล้ว cache ไว้
+    /// </summary>
+    /// <remarks>
+    /// เดิมได้มาฟรีจาก response ของ login ตอนนี้ไม่มี login แล้วจึงต้องถามเอง
+    /// ทำแบบ lazy เพราะ tool ส่วนใหญ่ไม่ได้ใช้ชื่อนี้ — ไม่ควรจ่ายค่า request
+    /// เพิ่มให้ทุกคำสั่งเพื่อข้อความบรรทัดเดียว
+    /// </remarks>
+    public async Task<string> GetWorkspaceNameAsync(CancellationToken ct)
+    {
+        if (_workspaceName is not null) return _workspaceName;
+
+        await _workspaceLock.WaitAsync(ct);
+        try
+        {
+            _workspaceName ??= (await SendAsync<WorkspaceSummary>(
+                HttpMethod.Get, "/api/v1/workspaces/current", null, ct)).Name;
+
+            return _workspaceName;
+        }
+        finally
+        {
+            _workspaceLock.Release();
+        }
+    }
 
     /// <summary>
     /// อ่านค่าจาก User Secrets ก่อน แล้วค่อยตกไป env var
@@ -49,45 +78,64 @@ public sealed class PmClient(IConfiguration configuration)
     private string BaseUrl =>
         (Setting("Pm:ApiUrl", "PM_API_URL") ?? "http://localhost:5081").TrimEnd('/');
 
-    private string Require(string secretKey, string envKey) =>
-        Setting(secretKey, envKey)
-        ?? throw new InvalidOperationException(
-            $"ยังไม่ได้ตั้ง {secretKey} — รัน `pwsh scripts/setup-mcp.ps1` " +
-            $"(หรือตั้ง environment variable {envKey})");
-
     // ─── auth ────────────────────────────────────────────────────────────
 
-    private async Task EnsureAuthAsync(CancellationToken ct)
+    /// <summary>
+    /// API token ที่ออกจากหน้า ตั้งค่า → การเชื่อมต่อ AI
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ ไม่มีการ login ไม่มี session ไม่มีวันหมดอายุที่ต้องต่อเอง — token ใบเดียว
+    ///    ใช้ตรง ๆ ทุกคำขอ ถ้ามันถูกเพิกถอน คำขอถัดไปได้ 401 ทันที ซึ่งเป็น
+    ///    พฤติกรรมที่ต้องการ (เพิกถอนแล้วต้องมีผลเดี๋ยวนั้น ไม่ใช่รอ token หมดอายุ)
+    /// </remarks>
+    private string Token => Setting("Pm:Token", "PM_TOKEN") ?? throw MissingToken();
+
+    private InvalidOperationException MissingToken()
     {
-        // เผื่อ clock skew + latency: ต่ออายุก่อนหมดจริง 1 นาที
-        if (_token is not null && DateTimeOffset.UtcNow < _tokenExpiresAt.AddMinutes(-1))
-            return;
+        // ─────────────────────────────────────────────────────────────────
+        //  ถ้าเจอค่าแบบเก่าให้บอกตรง ๆ ว่าเปลี่ยนวิธีแล้ว
+        //
+        //  คนที่อัปเดตมาจากรุ่นก่อนจะมี Pm:Email / Pm:Password ค้างอยู่ แล้วเจอ
+        //  "ยังไม่ได้ตั้ง Pm:Token" ซึ่งอ่านแล้วงงว่าทำไมของที่เคยใช้ได้ถึงพัง
+        //  — บอกทางแก้ให้ตรงจุดดีกว่าปล่อยให้ไปเดาเอง
+        // ─────────────────────────────────────────────────────────────────
+        var hasLegacy = Setting("Pm:Email", "PM_EMAIL") is not null
+            || Setting("Pm:Password", "PM_PASSWORD") is not null;
 
-        await _authLock.WaitAsync(ct);
-        try
-        {
-            if (_token is not null && DateTimeOffset.UtcNow < _tokenExpiresAt.AddMinutes(-1))
-                return;
-
-            await LoginAsync(ct);
-        }
-        finally
-        {
-            _authLock.Release();
-        }
+        return new InvalidOperationException(hasLegacy
+            ? "ระบบเปลี่ยนจากการ login ด้วยรหัสผ่านมาใช้ API token แล้ว — สร้าง token " +
+              "ที่หน้า ตั้งค่า → การเชื่อมต่อ AI แล้วรัน setup-mcp.ps1 ใหม่"
+            : "ยังไม่ได้ตั้ง Pm:Token — สร้าง token ที่หน้า ตั้งค่า → การเชื่อมต่อ AI " +
+              "แล้วรัน setup-mcp.ps1 (หรือตั้ง environment variable PM_TOKEN)");
     }
 
-    private async Task LoginAsync(CancellationToken ct)
+    // ─── HTTP core ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ยิง request หนึ่งครั้ง — ไม่มี retry เพราะไม่มี session ให้ต่ออายุ
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ ของเดิม (login ด้วยรหัสผ่าน) ต้องมี retry เมื่อเจอ 401 เพราะ access token
+    ///    ที่ cache ไว้หมดอายุหรือใช้ไม่ได้ได้หลายทาง แล้วต้อง login ใหม่เอง
+    ///
+    ///    API token ไม่มีเรื่องนั้นเลย: 401 แปลว่า "ใบนี้ใช้ไม่ได้แล้ว" จริง ๆ
+    ///    (ถูกเพิกถอน หมดอายุ หรือบัญชีถูกถอดออกจาก workspace) การลองซ้ำจึงได้
+    ///    ผลเดิมเสมอ — บอกสาเหตุให้ชัดแล้วให้คนไปสร้างใบใหม่ดีกว่า
+    /// </remarks>
+    private async Task<T> SendAsync<T>(
+        HttpMethod method, string path, object? payload, CancellationToken ct)
     {
-        var email = Require("Pm:Email", "PM_EMAIL");
-        var password = Require("Pm:Password", "PM_PASSWORD");
-        var wanted = Setting("Pm:Workspace", "PM_WORKSPACE");
+        using var req = new HttpRequestMessage(method, $"{BaseUrl}{path}");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+
+        // ไม่ส่ง X-Workspace-Id — token บอก workspace เองแล้ว
+        if (payload is not null)
+            req.Content = JsonContent.Create(payload, options: Json);
 
         HttpResponseMessage resp;
         try
         {
-            resp = await _http.PostAsJsonAsync(
-                $"{BaseUrl}/api/v1/auth/login", new { email, password }, Json, ct);
+            resp = await _http.SendAsync(req, ct);
         }
         catch (HttpRequestException ex)
         {
@@ -96,98 +144,14 @@ public sealed class PmClient(IConfiguration configuration)
                 $"(`dotnet run --project api` หรือ `docker compose up -d`) ({ex.Message})");
         }
 
-        var body = await resp.Content.ReadFromJsonAsync<Envelope<AuthResponse>>(Json, ct);
+        using var _ = resp;
 
-        if (!resp.IsSuccessStatusCode || body?.Data is null)
+        if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
             throw new InvalidOperationException(
-                $"login ล้มเหลว: {body?.Message ?? resp.StatusCode.ToString()}");
+                "API token ใช้ไม่ได้ — อาจถูกเพิกถอน หมดอายุ หรือบัญชีถูกถอดออกจาก " +
+                "workspace แล้ว สร้างใบใหม่ที่หน้า ตั้งค่า → การเชื่อมต่อ AI");
         }
-
-        _token = body.Data.AccessToken;
-        _tokenExpiresAt = body.Data.AccessTokenExpiresAt;
-
-        var ws = ResolveWorkspace(body.Data.Workspaces, wanted);
-        _workspaceId = ws.Id;
-        WorkspaceName = ws.Name;
-    }
-
-    private static WorkspaceSummary ResolveWorkspace(
-        IReadOnlyList<WorkspaceSummary> workspaces, string? wanted)
-    {
-        if (workspaces.Count == 0)
-            throw new InvalidOperationException("บัญชีนี้ยังไม่มี workspace");
-
-        if (string.IsNullOrWhiteSpace(wanted))
-        {
-            if (workspaces.Count == 1) return workspaces[0];
-
-            var names = string.Join(", ", workspaces.Select(w => $"{w.Name} ({w.Slug})"));
-            throw new InvalidOperationException(
-                $"มีหลาย workspace — ตั้ง env PM_WORKSPACE เป็น slug หรือ GUID ให้ชัด: {names}");
-        }
-
-        var match = workspaces.FirstOrDefault(w =>
-            string.Equals(w.Slug, wanted, StringComparison.OrdinalIgnoreCase) ||
-            w.Id.ToString().Equals(wanted, StringComparison.OrdinalIgnoreCase));
-
-        if (match is null)
-        {
-            var names = string.Join(", ", workspaces.Select(w => $"{w.Name} ({w.Slug})"));
-            throw new InvalidOperationException(
-                $"ไม่พบ workspace '{wanted}' — ที่มี: {names}");
-        }
-
-        return match;
-    }
-
-    // ─── HTTP core ─────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// ยิง request หนึ่งครั้ง ถ้าได้ 401 ให้ login ใหม่แล้วลองอีกครั้งเดียว
-    /// </summary>
-    /// <remarks>
-    /// ⚠️ ต้องมี retry จริง ๆ ไม่ใช่แค่ชื่อ — MCP server เป็น process ที่อยู่ยาว
-    /// ตลอด session ของ Claude Code ส่วน access token อายุ 24 ชม. และ
-    /// ClockSkew ฝั่ง API ตั้งเป็นศูนย์
-    ///
-    /// การเช็ควันหมดอายุล่วงหน้า 1 นาทีกันได้แค่ token ที่ "หมดอายุตามกำหนด"
-    /// แต่กันไม่ได้เมื่อ API restart แล้วเปลี่ยน JWT key, refresh token ถูก
-    /// revoke, หรือบัญชีถูกถอดออกจาก workspace — เคสพวกนี้ token ที่ cache ไว้
-    /// ใช้ไม่ได้ทันทีทั้งที่ยังไม่หมดอายุ ไม่มี retry แปลว่าทุก tool พังยาว
-    /// จนกว่าจะปิด Claude Code แล้วเปิดใหม่
-    /// </remarks>
-    private async Task<T> SendAsync<T>(
-        HttpMethod method, string path, object? payload, CancellationToken ct)
-    {
-        await EnsureAuthAsync(ct);
-
-        var (ok, value) = await TrySendAsync<T>(method, path, payload, ct);
-        if (ok) return value!;
-
-        // 401 — บังคับ login ใหม่ (ล้าง token ก่อน ไม่งั้น EnsureAuth จะเห็นว่า
-        // ยังไม่หมดอายุแล้วข้ามไป) แล้วลองอีกครั้ง ครั้งเดียวพอ ถ้ายัง 401 อีก
-        // แปลว่า credential ผิดจริง ไม่ใช่ token เก่า
-        _token = null;
-        await EnsureAuthAsync(ct);
-
-        var (retryOk, retryValue) = await TrySendAsync<T>(method, path, payload, ct, throwOn401: true);
-        return retryOk ? retryValue! : throw new UnreachableException();
-    }
-
-    private async Task<(bool Ok, T? Value)> TrySendAsync<T>(
-        HttpMethod method, string path, object? payload, CancellationToken ct, bool throwOn401 = false)
-    {
-        using var req = new HttpRequestMessage(method, $"{BaseUrl}{path}");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
-        req.Headers.Add("X-Workspace-Id", _workspaceId.ToString());
-        if (payload is not null)
-            req.Content = JsonContent.Create(payload, options: Json);
-
-        using var resp = await _http.SendAsync(req, ct);
-
-        if (resp.StatusCode == HttpStatusCode.Unauthorized && !throwOn401)
-            return (false, default);
 
         var body = await ReadEnvelopeAsync<T>(resp, ct);
 
@@ -198,7 +162,7 @@ public sealed class PmClient(IConfiguration configuration)
                 $"({body?.Code ?? "no_code"})");
         }
 
-        return (true, body.Data ?? throw new InvalidOperationException("API ตอบสำเร็จแต่ไม่มี data"));
+        return body.Data ?? throw new InvalidOperationException("API ตอบสำเร็จแต่ไม่มี data");
     }
 
     /// <summary>

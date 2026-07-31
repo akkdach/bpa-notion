@@ -20,6 +20,13 @@ public interface IPermissionService
     Task<PageRole?> GetEffectiveRoleAsync(Guid pageId, CancellationToken ct = default);
 
     /// <summary>
+    /// เหมือน <see cref="GetEffectiveRoleAsync"/> แต่ตอบได้แม้หน้าจะอยู่ในถังขยะ
+    /// — ใช้กับการกู้คืนเท่านั้น ที่อื่นให้ใช้ตัวปกติ
+    /// </summary>
+    Task<PageRole?> GetEffectiveRoleForDeletedAsync(
+        Guid pageId, CancellationToken ct = default);
+
+    /// <summary>
     /// access root ทั้งหมดที่ user คนนี้มองเห็น
     /// ใช้กรองผลค้นหาด้วย `access_root_id = ANY(...)` ใน query เดียว
     /// แทนการเช็คสิทธิ์ทีละผลลัพธ์ (ซึ่งทำให้ LIMIT ใช้ไม่ได้)

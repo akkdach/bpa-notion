@@ -7,11 +7,6 @@ namespace ProjectManagementMcp;
 
 public sealed record Envelope<T>(bool Success, T? Data, string? Message, string? Code);
 
-public sealed record AuthResponse(
-    string AccessToken,
-    DateTimeOffset AccessTokenExpiresAt,
-    IReadOnlyList<WorkspaceSummary> Workspaces);
-
 public sealed record WorkspaceSummary(Guid Id, string Slug, string Name, string? Icon, string Role);
 
 /// <summary>โหนดใน tree (sidebar) — ผลของ GET /api/v1/pages</summary>

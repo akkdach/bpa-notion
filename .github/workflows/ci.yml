@@ -315,6 +315,13 @@ jobs:
       - name: verify-repair (ทำ ancestor_ids/access_root_id เพี้ยนแล้วซ่อม)
         run: node scripts/verify-repair.mjs "$API_BASE"
 
+      # ⚠️ มี section ที่ตรวจว่า JWT ของเบราว์เซอร์ยังใช้ได้ ไม่ใช่ตรวจแต่ token
+      #    — การเพิ่ม authentication scheme ที่สอง (AddPolicyScheme +
+      #    ForwardDefaultSelector) ทำ auth เดิมพังทั้งระบบได้ โดยที่การทดสอบ
+      #    เฉพาะทางใหม่จะเขียวหมด
+      - name: verify-tokens (API token — ขอบเขต workspace, เพิกถอนทันที)
+        run: node scripts/verify-tokens.mjs "$API_BASE"
+
       - name: verify-mcp (JSON-RPC กับ MCP server จริง)
         run: node scripts/verify-mcp.mjs "$API_BASE"
 

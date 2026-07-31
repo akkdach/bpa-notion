@@ -31,6 +31,19 @@ public class AppDbContext(
     public DbSet<WorkspaceMember> WorkspaceMembers => Set<WorkspaceMember>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    /// <summary>
+    /// กุญแจของเครื่องภายนอก (MCP)
+    ///
+    /// ⚠️ ไม่มี tenant query filter โดยเจตนา — การ resolve token เกิด "ก่อน"
+    ///    ที่ระบบจะรู้ว่า request นี้อยู่ workspace ไหน (workspace มาจากตัว token เอง)
+    ///    ถ้าใส่ filter ไว้ การ lookup จะไม่เจออะไรเลยเพราะ CurrentWorkspaceId
+    ///    ยังเป็น null อยู่ตอนนั้น
+    ///
+    ///    การจำกัดขอบเขตจึงอยู่ที่ WHERE workspace_id ที่เขียนเองใน repository
+    ///    เหมือน IdentityQueries — ดูคอมเมนต์ที่ ApiTokenRepository
+    /// </summary>
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+
     // ─── pages ───────────────────────────────────────────────────────────
     public DbSet<Page> Pages => Set<Page>();
     public DbSet<PageAcl> PageAcls => Set<PageAcl>();

@@ -52,3 +52,6 @@ $RECYCLE.BIN/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Claude Code: keep the shared skill, ignore per-machine permissions
+.claude/settings.local.json

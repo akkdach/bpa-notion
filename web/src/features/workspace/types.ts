@@ -70,6 +70,48 @@ export interface AddMemberInput {
   role: WorkspaceRole
 }
 
+// ─── API token ───────────────────────────────────────────────────────────────
+
+/**
+ * active = ใช้ได้ · revoked = ถูกเพิกถอน · expired = เลยวันหมดอายุ
+ *
+ * เซิร์ฟเวอร์คำนวณให้แล้ว ฝั่งเว็บไม่เทียบ expiresAt กับนาฬิกาตัวเองซ้ำ —
+ * นาฬิกาเครื่องผู้ใช้เพี้ยนได้ และคนตัดสินว่า token ใช้ได้ไหมคือเซิร์ฟเวอร์
+ */
+export type ApiTokenStatus = 'active' | 'revoked' | 'expired'
+
+export interface ApiToken {
+  id: string
+  name: string
+  /** สี่ตัวท้ายของค่าจริง — ไว้ให้คนจำใบได้ ไม่ใช่ความลับ */
+  last4: string
+  status: ApiTokenStatus
+  createdAt: string
+  expiresAt?: string
+  lastUsedAt?: string
+}
+
+/**
+ * ผลของการสร้าง — มี `token` ค่าจริงติดมาด้วย
+ *
+ * ⚠️ ค่านี้อยู่ในหน่วยความจำของแท็บนี้เท่านั้นและไม่มีทางขอดูอีก (ฐานข้อมูล
+ *    เก็บแค่ hash) ห้ามเก็บลง localStorage หรือยัดเข้า query cache ที่ persist
+ */
+export interface CreatedApiToken {
+  id: string
+  name: string
+  token: string
+  last4: string
+  createdAt: string
+  expiresAt?: string
+}
+
+export interface CreateApiTokenInput {
+  name: string
+  /** null = ไม่มีวันหมดอายุ */
+  expiresInDays: number | null
+}
+
 /** role ที่มอบให้คนอื่นได้ — owner โอนด้วยวิธีนี้ไม่ได้ */
 export const ASSIGNABLE_ROLES = ['admin', 'member', 'guest'] as const
 

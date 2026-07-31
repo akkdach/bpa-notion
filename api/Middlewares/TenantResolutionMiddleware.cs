@@ -37,6 +37,50 @@ public class TenantResolutionMiddleware(RequestDelegate next, ILogger<TenantReso
 
         tenant.SetUser(userId.Value);
 
+        // ─────────────────────────────────────────────────────────────────
+        //  API token พก workspace มาในตัว
+        //
+        //  ⚠️ ค่านี้ "ชนะ" header เสมอ และถ้า header ชี้ไปคนละที่ต้องปฏิเสธ
+        //     ไม่ใช่เงียบ ๆ ใช้ค่าจาก token
+        //
+        //     บัญชี agent เป็นสมาชิกได้หลาย workspace ถ้าไม่ตรวจข้อนี้ ใบที่ออก
+        //     ให้ workspace A จะใช้กับ B ได้ทันทีแค่เปลี่ยน header — ซึ่งทำให้
+        //     "token ผูกกับ workspace" ที่โฆษณาไว้ไม่เป็นจริงเลย
+        // ─────────────────────────────────────────────────────────────────
+        var tokenWorkspace = ReadTokenWorkspace(context.User);
+
+        if (tokenWorkspace is { } scoped)
+        {
+            if (context.Request.Headers.TryGetValue(WorkspaceHeader, out var requested)
+                && Guid.TryParse(requested.ToString(), out var wanted)
+                && wanted != scoped)
+            {
+                logger.LogWarning(
+                    "API token ของ workspace {Scoped} ถูกใช้เรียก workspace {Wanted}",
+                    scoped, wanted);
+
+                await WriteErrorAsync(context, StatusCodes.Status403Forbidden,
+                    "token นี้ใช้ได้กับ workspace ที่ออกให้เท่านั้น", "token_workspace_mismatch");
+                return;
+            }
+
+            // ไม่ต้องตรวจสมาชิกภาพซ้ำ — ApiTokenRepository.ResolveAsync ทำไปแล้ว
+            // ในคิวรีเดียวกับที่ตรวจว่าใบยังใช้ได้ (ดูคอมเมนต์ที่นั่น)
+            var tokenRole = await identity.ResolveMembershipAsync(
+                userId.Value, scoped, context.RequestAborted);
+
+            if (tokenRole is null)
+            {
+                await WriteErrorAsync(context, StatusCodes.Status404NotFound,
+                    "ไม่พบ workspace", "workspace_not_found");
+                return;
+            }
+
+            tenant.SetWorkspace(scoped, tokenRole.Value);
+            await next(context);
+            return;
+        }
+
         if (!context.Request.Headers.TryGetValue(WorkspaceHeader, out var rawHeader))
         {
             // request ที่ไม่ผูก workspace (login, /me, list workspaces) — ปกติ
@@ -84,6 +128,17 @@ public class TenantResolutionMiddleware(RequestDelegate next, ILogger<TenantReso
     private static Guid? ReadUserId(ClaimsPrincipal principal)
     {
         var value = principal.FindFirstValue("sub");
+        return Guid.TryParse(value, out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// workspace ที่ API token ผูกไว้ — null เมื่อ request มาด้วย JWT ของเบราว์เซอร์
+    /// </summary>
+    private static Guid? ReadTokenWorkspace(ClaimsPrincipal principal)
+    {
+        var value = principal.FindFirstValue(
+            Configurations.ApiTokenAuthenticationHandler.WorkspaceClaim);
+
         return Guid.TryParse(value, out var id) ? id : null;
     }
 

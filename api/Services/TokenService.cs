@@ -84,6 +84,29 @@ public class TokenService : ITokenService
     public string HashRefreshToken(string token)
         => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  API token — กุญแจของเครื่องภายนอก (MCP)
+    //
+    //  ⚠️ มี prefix `pmt_` โดยเจตนา สองเหตุผล:
+    //
+    //    1. ตัว handler แยกออกได้ทันทีว่านี่ไม่ใช่ JWT โดยไม่ต้องลอง parse ก่อน
+    //       (JWT ขึ้นต้นด้วย "eyJ" เสมอ แต่การเดาจากรูปแบบเปราะกว่าการมีป้ายชัด ๆ)
+    //    2. เครื่องมือสแกนความลับใน git/log จับได้ด้วย pattern เดียว — token ที่
+    //       หน้าตาเหมือน base64 ทั่วไปหลุดขึ้น repo แล้วไม่มีใครสังเกต
+    // ═══════════════════════════════════════════════════════════════════════
+    public const string ApiTokenPrefix = "pmt_";
+
+    public ApiTokenPair CreateApiToken()
+    {
+        // 256 bit จาก CSPRNG เท่ากับ refresh token — ไม่มีโครงสร้างให้เดา
+        var token = ApiTokenPrefix + Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+
+        return new ApiTokenPair(
+            token,
+            HashRefreshToken(token),
+            token[^4..]);
+    }
+
     /// <summary>
     /// แปลง "24h" / "30d" / "45m" / "90s" เป็น TimeSpan
     /// รูปแบบนี้ตรงกับ convention ของโปรเจกต์อื่น (JWT_EXPIRES_IN=24h)

@@ -14,6 +14,19 @@ public interface IPermissionQueries
         Guid pageId, Guid userId, CancellationToken ct = default);
 
     /// <summary>
+    /// เหมือน <see cref="GetGrantsForPageAsync"/> แต่มองเห็นหน้าที่อยู่ในถังขยะด้วย
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ มีไว้สำหรับการกู้คืนเท่านั้น — คำถามคือ "คนนี้มีสิทธิ์กับหน้านี้ไหม"
+    ///    ซึ่งคำตอบไม่ควรเปลี่ยนเพราะหน้าถูกย้ายเข้าถังขยะ
+    ///
+    ///    แยกเป็นคนละ method ไม่ใช่แก้ตัวเดิม เพราะทุก call site อื่นถามคำถาม
+    ///    "แก้หน้านี้ได้ไหม" ซึ่งหน้าที่ถูกลบต้องตอบว่าไม่ได้
+    /// </remarks>
+    Task<List<AclGrant>> GetGrantsForDeletedPageAsync(
+        Guid pageId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
     /// access root ทั้งหมดที่ผู้ใช้มองเห็น
     /// ใช้กรองผลค้นหาด้วย access_root_id = ANY(...) ใน query เดียว
     /// </summary>

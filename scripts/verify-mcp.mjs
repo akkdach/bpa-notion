@@ -150,14 +150,30 @@ check('สร้างโปรเจกต์ (หน้าระดับบ�
 
 const projectId = project.body?.data?.id
 
+// ─────────────────────────────────────────────────────────────────────────
+//  กุญแจที่ MCP จะใช้
+//
+//  ⚠️ ไม่ใช่บัญชีข้างบน — token ผูกกับ "บัญชี agent" ที่เซิร์ฟเวอร์สร้างให้
+//     ตอนออกใบแรก MCP จึงทำงานในนามคนละคนกับที่สร้างโปรเจกต์ไว้
+//
+//     นั่นคือของจริงที่ลูกค้าใช้ และเป็นเงื่อนไขที่ทำให้ "เจ้าของแยกงานที่ AI
+//     ทำออกจากงานที่ตัวเองทำได้" เป็นจริง — ถ้าเทสต์ใช้บัญชีเดียวกันทั้งสองฝั่ง
+//     มันจะผ่านโดยไม่พิสูจน์เรื่องนั้นเลย
+// ─────────────────────────────────────────────────────────────────────────
+const issued = await api('/workspaces/current/tokens', {
+  body: { name: 'verify-mcp' }, token, workspaceId,
+})
+check('ออก API token ให้ MCP', issued.status === 200, JSON.stringify(issued.body))
+const apiToken = issued.body?.data?.token
+
 // ─── คุยกับ MCP ───────────────────────────────────────────────────────────
 console.log(`\n${C.yellow}── handshake ──${C.off}`)
 
+// ⚠️ ไม่มี PM_WORKSPACE แล้ว — ขอบเขตมากับตัว token ถ้ายังส่งอยู่จะเข้าใจผิดว่า
+//    สลับ workspace ได้ด้วยการแก้ค่านี้ (สลับไม่ได้ ต้องออกใบใหม่ใน workspace นั้น)
 const mcp = new McpProcess({
   PM_API_URL: BASE.replace(/\/api\/v1$/, ''),
-  PM_EMAIL: account.email,
-  PM_PASSWORD: account.password,
-  PM_WORKSPACE: workspaceId,
+  PM_TOKEN: apiToken,
 })
 
 try {

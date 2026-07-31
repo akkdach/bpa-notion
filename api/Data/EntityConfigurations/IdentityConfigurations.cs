@@ -39,6 +39,40 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     }
 }
 
+public class ApiTokenConfiguration : IEntityTypeConfiguration<ApiToken>
+{
+    public void Configure(EntityTypeBuilder<ApiToken> builder)
+    {
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.Id).HasDefaultValueSql("gen_random_uuid()");
+
+        builder.Property(t => t.Name).IsRequired().HasMaxLength(100);
+        builder.Property(t => t.Last4).IsRequired().HasMaxLength(8);
+        builder.Property(t => t.CreatedAt).HasDefaultValueSql("now()");
+
+        // SHA-256 hex = 64 ตัวเสมอ · unique เพราะ lookup ด้วยค่านี้ทุก request
+        builder.Property(t => t.TokenHash).IsRequired().HasMaxLength(64);
+        builder.HasIndex(t => t.TokenHash).IsUnique();
+
+        // ⚠️ ไม่มี composite FK ไป pages เหมือนตารางอื่น เพราะนี่เป็นตารางระดับ
+        //    identity ไม่ใช่เนื้อหาใน workspace — และ query filter ก็ไม่ใส่ด้วย
+        //    (ดูเหตุผลใน AppDbContext) การ resolve token เกิดก่อนที่จะรู้ว่า
+        //    workspace ไหน จึงกรองด้วย tenant filter ไม่ได้ตั้งแต่ต้น
+        builder.HasOne(t => t.User)
+               .WithMany()
+               .HasForeignKey(t => t.UserId)
+               .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne<Workspace>()
+               .WithMany()
+               .HasForeignKey(t => t.WorkspaceId)
+               .OnDelete(DeleteBehavior.Cascade);
+
+        // รายการ token ของ workspace หนึ่ง เรียงใหม่ก่อน
+        builder.HasIndex(t => new { t.WorkspaceId, t.CreatedAt });
+    }
+}
+
 public class WorkspaceConfiguration : IEntityTypeConfiguration<Workspace>
 {
     public void Configure(EntityTypeBuilder<Workspace> builder)

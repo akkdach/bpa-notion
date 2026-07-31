@@ -1,16 +1,27 @@
 using System.Text;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using ProjectManagementAPI.Services;
 
 namespace ProjectManagementAPI.Configurations;
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  JWT bearer authentication
+//  ยืนยันตัวตน — รับสองแบบผ่าน Authorization header เดียวกัน
+//
+//    · JWT       สำหรับเบราว์เซอร์ (อายุ 24 ชม. ได้จาก /auth/login)
+//    · API token สำหรับเครื่องภายนอกอย่าง MCP (ขึ้นต้น `pmt_` ไม่มีวันหมดอายุ
+//                เว้นแต่ตั้งไว้ เพิกถอนได้รายใบ)
 // ═══════════════════════════════════════════════════════════════════════════
 public static class AuthConfiguration
 {
     /// <summary>path prefix ของ SignalR hub — ใช้ตัดสินว่าจะรับ token จาก query string</summary>
     private const string HubPathPrefix = "/hubs";
+
+    /// <summary>scheme ที่ทำหน้าที่เลือกทางอย่างเดียว ไม่ได้ตรวจเอง</summary>
+    private const string RouteScheme = "PmAuth";
+
+    private const string ApiTokenPrefix = TokenService.ApiTokenPrefix;
 
     public static IServiceCollection AddJwtAuthentication(
         this IServiceCollection services,
@@ -43,9 +54,35 @@ public static class AuthConfiguration
         services
             .AddAuthentication(options =>
             {
-                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                // ─────────────────────────────────────────────────────────
+                //  scheme หลักเป็น "ตัวเลือกทาง" ไม่ใช่ตัวตรวจเอง
+                //
+                //  ระบบรับสองแบบผ่าน header เดียวกัน:
+                //    · JWT       — เบราว์เซอร์ (ได้มาจาก /auth/login)
+                //    · API token — เครื่องภายนอกอย่าง MCP (ขึ้นต้น pmt_)
+                //
+                //  แยกด้วย prefix ไม่ใช่ด้วยการ "ลอง parse JWT ก่อนแล้วค่อย
+                //  fallback" เพราะแบบหลังทำให้ทุก API token เสียเวลาไปกับการ
+                //  พยายาม validate JWT ที่ล้มเหลวแน่นอน และ log จะเต็มไปด้วย
+                //  ข้อความ token ผิดรูปที่ไม่ใช่ปัญหาจริง
+                // ─────────────────────────────────────────────────────────
+                options.DefaultScheme = RouteScheme;
                 options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
             })
+            .AddPolicyScheme(RouteScheme, RouteScheme, options =>
+            {
+                options.ForwardDefaultSelector = context =>
+                {
+                    var header = context.Request.Headers.Authorization.ToString();
+
+                    return header.StartsWith(
+                        $"Bearer {ApiTokenPrefix}", StringComparison.OrdinalIgnoreCase)
+                        ? ApiTokenAuthenticationHandler.SchemeName
+                        : JwtBearerDefaults.AuthenticationScheme;
+                };
+            })
+            .AddScheme<AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(
+                ApiTokenAuthenticationHandler.SchemeName, _ => { })
             .AddJwtBearer(options =>
             {
                 // ─────────────────────────────────────────────────────────

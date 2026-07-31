@@ -20,8 +20,17 @@ public interface ITokenService
     string HashRefreshToken(string token);
 
     TimeSpan RefreshTokenLifetime { get; }
+
+    /// <summary>
+    /// API token สำหรับเครื่องภายนอก (MCP) — คืนค่าจริงที่แสดงครั้งเดียว พร้อม hash
+    /// </summary>
+    ApiTokenPair CreateApiToken();
 }
 
 public record AccessToken(string Token, DateTimeOffset ExpiresAt);
 
 public record RefreshTokenPair(string Token, string TokenHash, DateTimeOffset ExpiresAt);
+
+/// <param name="Token">ค่าจริง — ส่งให้ผู้ใช้ครั้งเดียวแล้วลืมไปเลย</param>
+/// <param name="Last4">สี่ตัวท้าย เก็บไว้แสดงในรายการ</param>
+public record ApiTokenPair(string Token, string TokenHash, string Last4);

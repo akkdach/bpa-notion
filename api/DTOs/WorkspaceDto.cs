@@ -21,9 +21,10 @@ public record AddMemberRequest(string Email, string Role);
 /// ตัวเองดูเหมือน AI ทำ (หรือกลับกัน) ได้ ซึ่งทำลายจุดประสงค์ของคอลัมน์นี้ทั้งหมด
 ///
 /// ⚠️ ขอบเขตไม่ตรงกันเล็กน้อยโดยรู้ตัว: users.kind เป็นค่าระดับ "ทั้งระบบ" แต่ตั้ง
-///    ผ่าน endpoint ระดับ workspace ยอมรับได้เพราะ AI หนึ่งตัวผูกกับ workspace เดียว
-///    (Pm:Workspace เป็น slug เดียว) และ endpoint นี้ตรวจ owner/admin + สมาชิกภาพ
-///    ให้แล้ว ถ้าวันหนึ่งบัญชีเดียวถูกใช้หลาย workspace ต้องย้ายไปอยู่ใต้ /users
+///    ผ่าน endpoint ระดับ workspace ยอมรับได้เพราะบัญชี agent หนึ่งบัญชีผูกกับ
+///    workspace เดียว (ApiTokenService.EnsureAgentAsync ตั้งอีเมลจาก slug) และ
+///    endpoint นี้ตรวจ owner/admin + สมาชิกภาพให้แล้ว ถ้าวันหนึ่งบัญชีเดียวถูกใช้
+///    หลาย workspace ต้องย้ายไปอยู่ใต้ /users
 /// </param>
 public record UpdateMemberRoleRequest(string Role, string? Kind = null);
 

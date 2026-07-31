@@ -12,10 +12,10 @@ using ProjectManagementMcp;
 //  ดู mcp/README.md
 //
 //  config มาจากสองที่ (User Secrets ชนะ env var):
-//    Pm:ApiUrl    / PM_API_URL     default http://localhost:5081
-//    Pm:Email     / PM_EMAIL       *
-//    Pm:Password  / PM_PASSWORD    *
-//    Pm:Workspace / PM_WORKSPACE   slug หรือ GUID — ข้ามได้ถ้ามี workspace เดียว
+//    Pm:ApiUrl / PM_API_URL   default http://localhost:5081
+//    Pm:Token  / PM_TOKEN     * — API token จากหน้า ตั้งค่า → การเชื่อมต่อ AI
+//
+//  ไม่มีค่า workspace ให้ตั้ง: ขอบเขตมากับตัว token ใบหนึ่งใช้ได้กับ workspace เดียว
 // ═══════════════════════════════════════════════════════════════════════════
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -26,11 +26,11 @@ var builder = Host.CreateApplicationBuilder(args);
 //  Host.CreateApplicationBuilder โหลด Secret Manager ให้อัตโนมัติเฉพาะเมื่อ
 //  environment เป็น Development เท่านั้น MCP server ถูก Claude Code สั่งรัน
 //  ตรง ๆ โดยไม่มี DOTNET_ENVIRONMENT จึงตกเป็น Production และ secret หายไปเงียบ ๆ
-//  อาการคือ "ยังไม่ได้ตั้ง Pm:Email" ทั้งที่ตั้งไปแล้ว
+//  อาการคือ "ยังไม่ได้ตั้ง Pm:Token" ทั้งที่ตั้งไปแล้ว
 //
-//  optional: true เพราะยังไม่ตั้ง secret ก็ต้อง start ได้ แล้วค่อยไปพังตอน
-//  login พร้อมข้อความที่บอกวิธีแก้ — ไม่ใช่พังตั้งแต่ handshake ซึ่ง Claude Code
-//  จะขึ้นแค่ "server failed to start" โดยไม่บอกเหตุผล
+//  optional: true เพราะยังไม่ตั้ง secret ก็ต้อง start ได้ แล้วค่อยไปพังตอนเรียก
+//  tool ครั้งแรก พร้อมข้อความที่บอกวิธีแก้ — ไม่ใช่พังตั้งแต่ handshake ซึ่ง
+//  Claude Code จะขึ้นแค่ "server failed to start" โดยไม่บอกเหตุผล
 // ─────────────────────────────────────────────────────────────────────────
 builder.Configuration.AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true);
 

@@ -373,12 +373,15 @@ public class PageTreeService(
         var page = await pages.GetIncludingDeletedAsync(pageId, ct);
         if (page is null) return PageNotFound;
 
-        // ⚠️ ต้องเช็คสิทธิ์ที่ access root ซึ่งอาจถูกลบไปด้วย จึงเช็คที่ระดับ
-        //    workspace แทน — การกู้คืนเป็นงานของ owner/admin หรือคนที่แก้
-        //    หน้าแม่ได้
+        // ⚠️ ต้องเช็คสิทธิ์ที่ access root "ซึ่งถูกลบไปด้วยแล้ว" — ใช้ตัวปกติไม่ได้
+        //    เพราะ SoftDeleteFilter ตัดหน้าออกก่อน แล้วทุกคนที่ไม่ใช่ owner/admin
+        //    จะได้ null = ไม่มีสิทธิ์ เสมอ
+        //
+        //    อาการตอนนั้น: สมาชิกลบหน้าของตัวเอง เห็นมันอยู่ในถังขยะ กดกู้คืน
+        //    แล้วได้ 404 "ไม่พบหน้านี้" ทั้งที่เพิ่งเห็นมันอยู่
         if (tenant.WorkspaceRole?.IsWorkspaceWideEditor() != true)
         {
-            var role = await permissions.GetEffectiveRoleAsync(page.AccessRootId, ct);
+            var role = await permissions.GetEffectiveRoleForDeletedAsync(page.AccessRootId, ct);
             if (role is null || !role.Value.CanEdit()) return PageNotFound;
         }
 

@@ -36,6 +36,30 @@ public class PermissionQueries(AppDbContext db) : IPermissionQueries
             select new AclGrant(acl.SubjectType, acl.Role))
            .ToListAsync(ct);
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  เหมือนข้างบน แต่หาหน้าที่อยู่ในถังขยะเจอ
+    //
+    //  ⚠️ ตัวข้างบนใช้กับหน้าที่ถูกลบไม่ได้เลย: SoftDeleteFilter ตัดแถว pages
+    //     ออกก่อน JOIN จะได้ทำงาน ผลคือ "ไม่มี grant" ซึ่งอ่านเป็น "ไม่มีสิทธิ์"
+    //
+    //     อาการที่เกิดจริง: สมาชิกธรรมดาลบหน้าของตัวเองแล้วกู้คืนไม่ได้ ได้
+    //     404 ทั้งที่หน้าโผล่อยู่ในถังขยะของเขาเอง (owner/admin ไม่เจอเพราะ
+    //     RestoreAsync ลัดไม่เรียกตรงนี้)
+    //
+    //  ⚠️ ignore เฉพาะ SoftDeleteFilter — TenantFilter ต้องอยู่ ไม่งั้นกลายเป็น
+    //     ช่องอ่าน ACL ข้าม workspace
+    // ─────────────────────────────────────────────────────────────────────
+    public Task<List<AclGrant>> GetGrantsForDeletedPageAsync(
+        Guid pageId, Guid userId, CancellationToken ct = default)
+        => (from page in db.Pages.AsNoTracking()
+                .IgnoreQueryFilters([AppDbContext.SoftDeleteFilter])
+            join acl in db.PageAcls.AsNoTracking() on page.AccessRootId equals acl.PageId
+            where page.Id == pageId
+               && ((acl.SubjectType == AclSubjectType.User && acl.SubjectId == userId)
+                   || acl.SubjectType == AclSubjectType.Workspace)
+            select new AclGrant(acl.SubjectType, acl.Role))
+           .ToListAsync(ct);
+
     public Task<List<Guid>> GetVisibleAccessRootsAsync(
         Guid userId, bool includeWorkspaceWide, CancellationToken ct = default)
         => db.PageAcls.AsNoTracking()

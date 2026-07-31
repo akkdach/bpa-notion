@@ -1,11 +1,11 @@
-import { Building2, Palette, Users } from 'lucide-react'
+import { Bot, Building2, Palette, Users } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/features/auth'
 import { AppearanceSettings, SettingsLayout, type SettingsSection } from '@/features/settings'
 import {
-  MemberSettings, WorkspaceSettings,
-  useAddMember, useCurrentWorkspace, useMembers,
-  useRemoveMember, useUpdateMemberRole, useUpdateWorkspace,
+  AiConnectionSettings, MemberSettings, WorkspaceSettings,
+  useAddMember, useApiTokens, useCreateApiToken, useCurrentWorkspace, useMembers,
+  useRemoveMember, useRevokeApiToken, useUpdateMemberRole, useUpdateWorkspace,
 } from '@/features/workspace'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -29,6 +29,9 @@ export function SettingsPage() {
   const addMember = useAddMember()
   const updateRole = useUpdateMemberRole()
   const removeMember = useRemoveMember()
+  const apiTokens = useApiTokens()
+  const createToken = useCreateApiToken()
+  const revokeToken = useRevokeApiToken()
 
   const role = currentWorkspace?.role
   const canManage = role === 'owner' || role === 'admin'
@@ -37,6 +40,7 @@ export function SettingsPage() {
   const sections: SettingsSection[] = [
     { id: 'workspace', label: 'workspace', icon: <Building2 className="size-4" aria-hidden /> },
     { id: 'members', label: 'สมาชิก', icon: <Users className="size-4" aria-hidden /> },
+    { id: 'ai', label: 'การเชื่อมต่อ AI', icon: <Bot className="size-4" aria-hidden /> },
     { id: 'appearance', label: 'การแสดงผล', icon: <Palette className="size-4" aria-hidden /> },
   ]
 
@@ -70,6 +74,18 @@ export function SettingsPage() {
           onChangeRole={(userId, newRole) =>
             updateRole.mutateAsync({ userId, role: newRole }).then(() => undefined)}
           onRemove={(userId) => removeMember.mutateAsync(userId).then(() => undefined)}
+        />
+      )}
+
+      {active === 'ai' && (
+        <AiConnectionSettings
+          tokens={apiTokens.data ?? []}
+          isLoading={apiTokens.isLoading}
+          error={apiTokens.error}
+          canManage={canManage}
+          isBusy={createToken.isPending || revokeToken.isPending}
+          onCreate={(input) => createToken.mutateAsync(input)}
+          onRevoke={(tokenId) => revokeToken.mutateAsync(tokenId).then(() => undefined)}
         />
       )}
 
