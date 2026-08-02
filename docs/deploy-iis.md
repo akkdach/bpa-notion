@@ -11,7 +11,7 @@
 
 | ของ | ทำไม |
 |---|---|
-| **ASP.NET Core Hosting Bundle (.NET 10)** | ไม่ใช่แค่ Runtime — มันติดตั้ง `AspNetCoreModuleV2` ที่ `web.config` อ้างถึง ไม่มีแล้วได้ **500.19** หรือ **502.5** · ติดตั้งเสร็จต้อง `iisreset` |
+| **AspNetCoreModuleV2** (ANCM) | มากับ ASP.NET Core Hosting Bundle **เวอร์ชันไหนก็ได้** — ถ้ามี ASP.NET Core site อื่นรันอยู่บนเครื่องแล้วก็มีแล้ว ไม่มีจะได้ **500.19** หรือ **502.5** · **ตัว .NET runtime ไม่ต้องลง** เพราะ publish แบบ self-contained |
 | **URL Rewrite Module** | ให้ SPA เปิดหน้าลึกแล้วกด F5 ไม่ 404 |
 | **Application Request Routing (ARR)** | เฉพาะเมื่อ SPA กับ API อยู่คนละ site แล้วต้อง proxy `/api` |
 | **PostgreSQL 18 + PGroonga** | ไม่มี PGroonga = ค้นหาภาษาไทยพัง |
@@ -39,14 +39,49 @@ Set-ItemProperty IIS:\AppPools\<ชื่อ pool> -Name enable32BitAppOnWin64 -
 
 ---
 
-## 2. Publish
+## 2. Publish — self-contained (ไม่ต้องลง .NET บนเซิร์ฟเวอร์)
 
 ```powershell
-cd D:\Projects\notion\api
-dotnet publish -c Release -o publish
+cd D:\Projects\notion
+pwsh scripts\publish-iis.ps1
 ```
 
-เอาทั้งโฟลเดอร์ `publish\` ไปวางที่ physical path ของ site
+ได้ `api\publish\` (~120 MB) เอาทั้งโฟลเดอร์ไปวางที่ physical path ของ site
+
+**ทำไม self-contained:** เซิร์ฟเวอร์ปลายทางมีระบบอื่นรันบน .NET รุ่นเก่ากว่า
+framework-dependent จึงได้ **500.31 — Failed to load ASP.NET Core runtime**
+(เจอมาแล้วของจริง) และการไปลง Hosting Bundle รุ่นใหม่ต้อง `iisreset`
+ซึ่งทำให้ระบบอื่นบนเครื่องดับไปด้วย
+
+`web.config` จึงตั้ง `processPath=".\ProjectManagementAPI.exe"` ไม่ใช่ `"dotnet"`
+— `.exe` ที่มากับ publish ไม่พึ่ง runtime บนเครื่องเลย
+
+> `hostingModel="inprocess"` ใช้กับ self-contained ได้ (ยืนยันจาก web.config ที่ SDK
+> generate ให้เอง) ไม่ต้องเปลี่ยนเป็น `outofprocess`
+
+**แลกกับ:** ขนาด ~120 MB และ security patch ของ .NET ต้อง publish ใหม่เอง
+ไม่ได้อัปเดตตามเครื่อง
+
+สคริปต์ตรวจให้ด้วยว่ามีสี่อย่างครบ — ทั้งหมดเป็นของที่ **ขาดแล้ว publish ยังสำเร็จ
+แต่ไปพังตอน runtime บนเซิร์ฟเวอร์** ซึ่งเป็นที่ที่แย่ที่สุดในการรู้:
+
+| ตรวจ | ขาดแล้วเป็นยังไง |
+|---|---|
+| `ProjectManagementAPI.exe` | ต้องพึ่ง `dotnet` บนเครื่อง → 500.31 |
+| `coreclr.dll` | publish ออกมาเป็น framework-dependent → 500.31 |
+| `yrs.dll` | **`append_content` (ผังงาน mermaid) พัง ส่วนอื่นทำงานปกติหมด** |
+| `environmentVariables` ใน web.config | SDK generate ทับ → ค่าที่ตั้งไว้หายหมด |
+
+### ถ้าจะใช้ framework-dependent แทน
+
+ต้องลง **ASP.NET Core Hosting Bundle 10.x** บนเซิร์ฟเวอร์ก่อน แล้ว `iisreset`
+
+```powershell
+dotnet --list-runtimes | Select-String "Microsoft.AspNetCore.App 10\."
+```
+
+ไม่มีบรรทัดนี้ = ยังใช้ไม่ได้ · ติดตั้งหลายเวอร์ชันคู่กันได้ ไม่กระทบระบบอื่น
+นอกจากตอน `iisreset`
 
 `web.config` มาจาก [`api/web.config`](../api/web.config) ที่เก็บใน git — csproj ตั้ง
 `IsTransformWebConfigDisabled` ไว้ ไม่ให้ SDK สร้างทับ (ค่าเริ่มต้นมันจะ generate ใหม่
@@ -183,7 +218,15 @@ curl.exe -i https://<โดเมน>/api/v1/health
 
 ต้องได้ **200 พร้อม JSON** — ถ้าได้ HTML แปลว่า request ไม่ถึง API (ตกลง SPA fallback)
 
-**start ไม่ขึ้น (500.30 / 502.5)** → อ่าน `publish\logs\stdout*.log`
+| อาการ | แปลว่า |
+|---|---|
+| **500.19** / **502.5** | ไม่มี `AspNetCoreModuleV2` — ลง Hosting Bundle (เวอร์ชันไหนก็ได้) |
+| **500.31** | หา runtime ไม่เจอ — publish ออกมาเป็น framework-dependent ใช้ `scripts\publish-iis.ps1` แทน |
+| **500.30** | แอป start แล้ว throw — อ่าน stdout log ล่าง |
+| `append_content` พังตัวเดียว | App Pool เป็น 32-bit → `yrs.dll` โหลดไม่ขึ้น |
+| ได้ HTML แทน JSON | request ไม่ถึง API ตกลง SPA fallback — แก้ที่ rewrite rule |
+
+**start ไม่ขึ้น** → อ่าน `publish\logs\stdout*.log`
 เป็นที่เดียวที่บอกว่า throw เพราะอะไร
 
 ⚠️ ต้อง **สร้างโฟลเดอร์ `logs\` เองและให้ app pool identity เขียนได้**
