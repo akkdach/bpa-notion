@@ -9,6 +9,18 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- ─────────────────────────────────────────────────────────────────
+         ใช้ web.config ที่เราเขียนเอง ไม่ให้ SDK สร้างทับ
+
+         ค่าเริ่มต้น SDK จะ "generate ใหม่" ทุกครั้งที่ publish ซึ่งลบทุกอย่าง
+         ที่ตั้งไว้ (environmentVariables, stdout log) ทิ้งเงียบ ๆ — อาการคือ
+         deploy รอบสองแล้วแอปพังทั้งที่ไม่ได้แก้โค้ดอะไรเลย
+
+         ⚠️ แลกกับการที่ต้องดูแล web.config เอง: ถ้าเปลี่ยนชื่อ assembly
+            ต้องไปแก้ arguments ใน web.config ด้วย
+         ───────────────────────────────────────────────────────────────── -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+
+    <!-- ─────────────────────────────────────────────────────────────────
          Secret Manager (dev เท่านั้น)
 
          ค่าลับตอน dev (password ของ postgres, JWT key) เก็บนอก repo ที่

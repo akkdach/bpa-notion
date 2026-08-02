@@ -155,6 +155,11 @@ dotnet run scripts/run-sql.cs db/probe/thai-search-probe.sql   # ต้อง PA
 > **เชื่อมต่อ AI เข้ากับระบบ** — ทำตาม [`docs/connect-ai.md`](docs/connect-ai.md)
 > (คู่มือสำหรับผู้ใช้/ลูกค้า) ส่วนรายละเอียดเชิงเทคนิคอยู่ใน [`mcp/README.md`](mcp/README.md)
 
+> **deploy ขึ้น IIS แทน docker** — ดู [`docs/deploy-iis.md`](docs/deploy-iis.md)
+> ต่างกันหลายเรื่องพอที่จะทำตามคู่มือหลักตรง ๆ แล้วพัง (App Pool ต้องเป็น 64-bit
+> ไม่งั้น native library ของ Yjs โหลดไม่ขึ้น · ไม่มี `try_files` ต้องเขียน rewrite rule เอง
+> · PostgreSQL + PGroonga ต้องลงแยก)
+
 > `mcp/` คุยกับแอปผ่าน REST API เหมือน client ทั่วไป **ไม่แตะฐานข้อมูลเอง** จึงได้
 > tenant isolation และ permission check ชุดเดียวกับที่เว็บได้ ไม่ต้องเขียนซ้ำ
 
