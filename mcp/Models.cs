@@ -65,8 +65,12 @@ public sealed record PageNote(
     string Body,
     DateTimeOffset CreatedAt);
 
-/// <summary>ผลการเขียนเนื้อหา — ผลของ POST /api/v1/pages/{id}/content/paragraphs</summary>
-public sealed record AppendResult(long Seq, int ParagraphCount);
+/// <summary>ผลการเขียนเนื้อหา — ผลของ POST /api/v1/pages/{id}/content/markdown</summary>
+/// <param name="Warnings">
+/// สิ่งที่ถูกลดรูป (ตาราง รูป HTML การซ้อนที่ลึกเกิน) — ต้องส่งต่อให้โมเดลเห็นเสมอ
+/// ไม่ใช่กลืนไว้ ไม่งั้นมันจะเชื่อว่าเขียนของที่ระบบรับไม่ได้ลงไปสำเร็จแล้ว
+/// </param>
+public sealed record AppendResult(long Seq, int BlockCount, IReadOnlyList<string> Warnings);
 
 /// <summary>ผลค้นหา — ผลของ GET /api/v1/search</summary>
 public sealed record SearchResult(

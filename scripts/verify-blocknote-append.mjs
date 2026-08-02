@@ -42,7 +42,7 @@ async function importEsm(name) {
 }
 
 const Y = await importEsm('yjs')
-const { BlockNoteEditor } = await importEsm('@blocknote/core')
+const { BlockNoteEditor, markdownToHTML } = await importEsm('@blocknote/core')
 const { yXmlFragmentToProseMirrorRootNode } = await importEsm('y-prosemirror')
 
 const BASE = process.argv[2] ?? 'http://localhost:5081/api/v1'
@@ -111,6 +111,84 @@ function buildDoc(frames) {
     if (frame.length > 0) Y.applyUpdate(doc, frame)
   }
   return doc
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  oracle ของการแปลง markdown → ชนิดบล็อก
+//
+//  ⚠️ นี่คือสิ่งที่ BlockNoteWriter.cs อ้างว่า "ไม่มี" ตอนให้เหตุผลว่าทำไมถึงรับ
+//     แค่ย่อหน้า — @blocknote/core export `markdownToHTML()` ซึ่งเป็น parser
+//     markdown ที่เขียนเองไม่มี dependency และ **ทำงานใน Node เปล่า ๆ ได้**
+//     (ตัวเต็ม `markdownToBlocks` ใช้ไม่ได้ — มันเรียก document.createElement)
+//
+//     ลำดับชนิดบล็อกที่คาดหวังจึงมาจาก parser ของ BlockNote เอง ไม่ใช่จากสิ่งที่
+//     เราคิดว่าถูก ซึ่งเป็นคนละเรื่องกันโดยสิ้นเชิงกับไลบรารีเวอร์ชัน 0.x
+// ═══════════════════════════════════════════════════════════════════════════
+function expectedBlockTypes(html) {
+  const types = []
+  const lists = []          // 'ul' | 'ol' — ซ้อนกันได้
+  let quoteDepth = 0
+  let pendingItem = null    // ชนิดของ <li> ที่รอ <p> แรกของมัน
+
+  const tags = /<(\/?)([a-z0-9]+)([^>]*)>/gi
+
+  for (let m = tags.exec(html); m !== null; m = tags.exec(html)) {
+    const [, closing, rawName, attrs] = m
+    const name = rawName.toLowerCase()
+
+    if (closing) {
+      if (name === 'ul' || name === 'ol') lists.pop()
+      else if (name === 'blockquote') quoteDepth--
+      continue
+    }
+
+    if (name === 'ul' || name === 'ol') { lists.push(name); continue }
+    if (name === 'blockquote') { quoteDepth++; continue }
+
+    if (name === 'li') {
+      // checkListItem รู้ได้จาก <input type="checkbox"> ที่ตามมาทันที
+      const rest = html.slice(m.index + m[0].length)
+      pendingItem = rest.startsWith('<input type="checkbox"')
+        ? 'checkListItem'
+        : (lists.at(-1) === 'ol' ? 'numberedListItem' : 'bulletListItem')
+      continue
+    }
+
+    if (name === 'p') {
+      // <p> ตัวแรกใน <li> คือ "เนื้อของรายการ" ไม่ใช่ย่อหน้าแยก
+      if (pendingItem !== null) { types.push(pendingItem); pendingItem = null }
+      // ⚠️ blockquote หลายย่อหน้า → quote หลายบล็อกพี่น้องกัน ไม่ใช่ quote เดียวที่มีย่อหน้าข้างใน
+      //    (schema ของ quote เป็น inline* — มันซ้อนย่อหน้าไม่ได้)
+      else types.push(quoteDepth > 0 ? 'quote' : 'paragraph')
+      continue
+    }
+
+    if (/^h[1-6]$/.test(name)) { types.push('heading'); continue }
+    if (name === 'pre') { types.push('codeBlock'); continue }
+    if (name === 'hr') { types.push('divider'); continue }
+  }
+
+  return types
+}
+
+/**
+ * ไล่เก็บบล็อกตามลำดับที่คนอ่าน — ลงลูกก่อนแล้วค่อยไปพี่น้องถัดไป
+ * รองรับลิสต์ซ้อนชั้นไว้ตั้งแต่ต้นเพื่อไม่ต้องแก้ตอน S3
+ */
+function collectBlocks(blockGroup, out = []) {
+  // ⚠️ ยอมรับ null เงียบ ๆ โดยเจตนา — เอกสารที่ว่างเพราะเขียนล้มเหลวต้องทำให้
+  //    "เคสที่ assert เนื้อหา" แดง ไม่ใช่ทำให้สคริปต์ crash แล้วซ่อน section ที่เหลือ
+  if (!blockGroup) return out
+
+  blockGroup.forEach((container) => {
+    const content = container.firstChild
+    if (content) out.push(content)
+
+    if (container.childCount > 1 && container.child(1)?.type.name === 'blockGroup') {
+      collectBlocks(container.child(1), out)
+    }
+  })
+  return out
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -279,6 +357,371 @@ const tooMany = await api(`/pages/${pageId}/content/paragraphs`, {
 })
 check('เกินเพดานต่อครั้ง → 400', tooMany.status === 400 && tooMany.body?.code === 'too_many_paragraphs',
   `ได้ ${tooMany.status} ${tooMany.body?.code}`)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  markdown — หัวข้อ ลิสต์ อ้างอิง โค้ด เส้นคั่น
+//
+//  ใช้หน้าใหม่ ไม่ปนกับหน้าย่อหน้าข้างบน เพื่อให้จำนวนบล็อกที่ assert อ่านง่าย
+// ═══════════════════════════════════════════════════════════════════════════
+section('markdown → บล็อกครบทุกชนิด')
+
+const mdPage = await api('/pages', { body: { parentId: null, title: 'หน้าที่ AI เขียน markdown' }, ...as })
+const mdPageId = mdPage.body?.data?.id
+
+const MERMAID_SOURCE = 'graph TD\n  A[เริ่มงาน] --> B{ตรวจแล้วหรือยัง}\n  B -->|ใช่| C[เสร็จ]'
+
+const markdown = [
+  '# รายงานประจำสัปดาห์',
+  '',
+  'สรุปงานที่ทำเสร็จแล้วพร้อมผังงานขั้นตอนอนุมัติ',
+  '',
+  '## ขั้นตอนถัดไป',
+  '',
+  '- ตรวจสอบยอดขายสาขารังสิต',
+  '- ปิดงบเดือนกันยายน',
+  '',
+  '1. ส่งให้หัวหน้าตรวจ',
+  '',
+  '- [x] เก็บข้อมูลครบแล้ว',
+  '- [ ] ยังไม่ได้สรุป',
+  '',
+  '> ข้อมูลจากระบบบัญชีอาจคลาดเคลื่อนได้',
+  '',
+  '```mermaid',
+  MERMAID_SOURCE,
+  '```',
+  '',
+  '---',
+  '',
+].join('\n')
+
+const mdWrote = await api(`/pages/${mdPageId}/content/markdown`, { body: { markdown }, ...as })
+check('เขียน markdown ลงหน้าว่างได้', mdWrote.status === 200, JSON.stringify(mdWrote.body))
+
+const mdDoc = await api(`/pages/${mdPageId}/ydoc`, { method: 'GET', raw: true, ...as })
+let mdNode
+try {
+  mdNode = yXmlFragmentToProseMirrorRootNode(
+    buildDoc(decodeFrames(mdDoc.bytes)).getXmlFragment('blocknote'), schema)
+  check('แปลงเป็น ProseMirror node ได้', true)
+} catch (error) {
+  check('แปลงเป็น ProseMirror node ได้', false, error.message)
+}
+
+if (mdNode) {
+  try {
+    mdNode.check()
+    check('node.check() ผ่าน', true)
+  } catch (error) {
+    check('node.check() ผ่าน', false, error.message)
+  }
+
+  check('ระดับบนสุดเป็น blockGroup เดียวเป๊ะ',
+    mdNode.childCount === 1 && mdNode.firstChild?.type.name === 'blockGroup',
+    `childCount=${mdNode.childCount} first=${mdNode.firstChild?.type.name}`)
+
+  const blocks = collectBlocks(mdNode.firstChild)
+  const actualTypes = blocks.map((b) => b.type.name)
+  const oracleTypes = expectedBlockTypes(await markdownToHTML(markdown))
+
+  // ⚠️ เคสตัดสินของระยะนี้ — เทียบกับ parser ของ BlockNote เอง
+  check('ลำดับชนิดบล็อกตรงกับ markdownToHTML ของ BlockNote',
+    JSON.stringify(actualTypes) === JSON.stringify(oracleTypes),
+    `ได้      ${JSON.stringify(actualTypes)}\n      คาดหวัง ${JSON.stringify(oracleTypes)}`)
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  ⚠️ ข้อนี้สำคัญกว่าที่เห็น
+  //
+  //  ทดลองแล้วว่า: ถ้าใส่ชื่อ mark ที่ schema ไม่รู้จัก node.check() **ผ่าน**
+  //  แต่ข้อความถูกลบทิ้งเงียบ ๆ (textContent เป็นสตริงว่าง) — check() อย่างเดียว
+  //  จึงไม่พอ ต้อง assert ข้อความทุกครั้ง
+  // ─────────────────────────────────────────────────────────────────────
+  for (const phrase of ['รายงานประจำสัปดาห์', 'สาขารังสิต', 'ส่งให้หัวหน้าตรวจ',
+    'เก็บข้อมูลครบแล้ว', 'ข้อมูลจากระบบบัญชีอาจคลาดเคลื่อนได้']) {
+    check(`ข้อความ "${phrase}" ไม่หาย`, mdNode.textContent.includes(phrase))
+  }
+
+  const heading = blocks.find((b) => b.type.name === 'heading')
+  // ⚠️ assert บน "สตริง" โดยเจตนา — XmlElement.InsertAttribute รับได้แค่ string
+  //    ค่า level จึงมาถึงเบราว์เซอร์เป็น "1" ไม่ใช่ 1 ซึ่ง render ถูก (`h` + `"1"`)
+  //    อย่า "แก้" ให้เป็น number — เขียนแบบนั้นไม่ได้
+  check('heading มี level เป็นสตริง "1"', String(heading?.attrs?.level) === '1',
+    JSON.stringify(heading?.attrs))
+
+  const h2 = blocks.filter((b) => b.type.name === 'heading')[1]
+  check('หัวข้อระดับสองได้ level "2"', String(h2?.attrs?.level) === '2', JSON.stringify(h2?.attrs))
+
+  const checks = blocks.filter((b) => b.type.name === 'checkListItem')
+  check('- [x] → checked เป็นค่าจริง', Boolean(checks[0]?.attrs?.checked), JSON.stringify(checks[0]?.attrs))
+  // ⚠️ "false" เป็นสตริงที่ truthy ใน JS — ถ้าเซิร์ฟเวอร์เขียน checked="false"
+  //    ช่องจะติ๊กทั้งที่ markdown บอกว่ายังไม่ติ๊ก ต้องละ attribute ไปเลย
+  check('- [ ] → checked ต้องไม่ใช่ค่าจริง (ห้ามเป็นสตริง "false")',
+    !checks[1]?.attrs?.checked, JSON.stringify(checks[1]?.attrs))
+
+  const divider = blocks.find((b) => b.type.name === 'divider')
+  check('divider ไม่มีลูกเลย', divider?.childCount === 0, `ได้ ${divider?.childCount}`)
+
+  const code = blocks.find((b) => b.type.name === 'codeBlock')
+  check('codeBlock มี language = mermaid', code?.attrs?.language === 'mermaid',
+    JSON.stringify(code?.attrs))
+  check('ซอร์ส mermaid เหมือนเดิมทุกไบต์ รวมการขึ้นบรรทัด',
+    code?.textContent === MERMAID_SOURCE,
+    `${JSON.stringify(code?.textContent)}\n      ≠ ${JSON.stringify(MERMAID_SOURCE)}`)
+
+  const ids = blocks.map((_, i) => mdNode.firstChild.child(i)?.attrs?.id).filter(Boolean)
+  check('ทุก blockContainer มี id ไม่ซ้ำ', new Set(ids).size === ids.length, JSON.stringify(ids))
+}
+
+section('⚠️ ตัวหนา/เอียง/ขีดฆ่า/โค้ด/ลิงก์ ต้องไม่ทำข้อความหาย')
+// ═══════════════════════════════════════════════════════════════════════════
+//  ทดลองแล้วว่าชื่อ mark ที่ schema ไม่รู้จักทำให้ "ข้อความช่วงนั้นถูกลบทิ้ง"
+//  โดยที่ node.check() ยังผ่าน — เคสนี้จึง assert textContent ก่อน แล้วค่อย
+//  ดูว่า mark ถูกต้องไหม ถ้าสลับลำดับจะอ่านผลผิดตอนพัง
+// ═══════════════════════════════════════════════════════════════════════════
+
+const markPage = await api('/pages', { body: { parentId: null, title: 'ข้อความมีรูปแบบ' }, ...as })
+const markPageId = markPage.body?.data?.id
+
+const markSource =
+  'ปกติ **หนา** และ *เอียง* กับ ~~ขีดฆ่า~~ แล้ว `โค้ด` จบด้วย [ลิงก์](https://x.test/ก)'
+
+const markWrote = await api(`/pages/${markPageId}/content/markdown`, {
+  body: { markdown: `${markSource}\n` }, ...as,
+})
+check('เขียนข้อความที่มีรูปแบบได้', markWrote.status === 200, JSON.stringify(markWrote.body))
+
+const markDoc = await api(`/pages/${markPageId}/ydoc`, { method: 'GET', raw: true, ...as })
+let markNode
+try {
+  markNode = yXmlFragmentToProseMirrorRootNode(
+    buildDoc(decodeFrames(markDoc.bytes)).getXmlFragment('blocknote'), schema)
+  markNode.check()
+  check('node.check() ผ่าน', true)
+} catch (error) {
+  check('node.check() ผ่าน', false, error.message)
+}
+
+if (markNode) {
+  // ⚠️ เครื่องหมาย markdown ต้องถูก "ตัดทิ้ง" ไม่ใช่ค้างอยู่ในข้อความ
+  const expectedText = 'ปกติ หนา และ เอียง กับ ขีดฆ่า แล้ว โค้ด จบด้วย ลิงก์'
+  check('ข้อความครบและไม่มีเครื่องหมาย markdown ค้าง',
+    markNode.textContent === expectedText,
+    `${JSON.stringify(markNode.textContent)}\n      ≠ ${JSON.stringify(expectedText)}`)
+
+  const runs = []
+  markNode.descendants((child) => {
+    if (child.isText) runs.push({ text: child.text, marks: child.marks.map((m) => m.type.name) })
+  })
+
+  const marksOf = (needle) =>
+    runs.find((r) => r.text.includes(needle))?.marks ?? []
+
+  check('"หนา" ได้ mark bold', marksOf('หนา').includes('bold'), JSON.stringify(runs))
+  check('"เอียง" ได้ mark italic', marksOf('เอียง').includes('italic'), JSON.stringify(runs))
+  check('"ขีดฆ่า" ได้ mark strike', marksOf('ขีดฆ่า').includes('strike'), JSON.stringify(runs))
+  check('"โค้ด" ได้ mark code', marksOf('โค้ด').includes('code'), JSON.stringify(runs))
+  check('"ลิงก์" ได้ mark link', marksOf('ลิงก์').includes('link'), JSON.stringify(runs))
+
+  // ⚠️ Insert ที่ attributes เป็น null สืบทอดรูปแบบจากตำแหน่งนั้น — ถ้าเขียน
+  //    ทีละช่วงแทนที่จะ Format ทับ ข้อความ "ปกติ" จะกลายเป็นตัวหนาไปด้วย
+  check('"ปกติ" ที่อยู่ก่อนตัวหนาต้องไม่ติดรูปแบบมาด้วย',
+    marksOf('ปกติ').length === 0, JSON.stringify(runs))
+
+  let href = null
+  markNode.descendants((child) => {
+    const mark = child.marks?.find((m) => m.type.name === 'link')
+    if (mark) href = mark.attrs.href
+  })
+  check('ลิงก์เก็บ href ไว้ครบ (URL ไม่หาย)', href === 'https://x.test/ก', String(href))
+}
+
+section('รายการซ้อนชั้น')
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⚠️ blockGroup ที่ไม่มีลูกผิด content expression (blockGroupChild+) แล้ว
+//     y-prosemirror จะลบมันทิ้งและกระจายการลบไปทุกเครื่อง — เคสนี้จึงต้อง
+//     assert ทั้ง "รูปร่างถูก" และ "ข้อความไม่หาย"
+// ═══════════════════════════════════════════════════════════════════════════
+
+const nestedPage = await api('/pages', { body: { parentId: null, title: 'รายการซ้อนชั้น' }, ...as })
+const nestedPageId = nestedPage.body?.data?.id
+
+const nestedMarkdown = [
+  '- แม่',
+  '  - ลูก',
+  '    - หลาน',
+  '- แม่คนที่สอง',
+  '',
+].join('\n')
+
+const nestedWrote = await api(`/pages/${nestedPageId}/content/markdown`, {
+  body: { markdown: nestedMarkdown }, ...as,
+})
+check('เขียนรายการซ้อนชั้นได้', nestedWrote.status === 200, JSON.stringify(nestedWrote.body))
+
+const nestedDoc = await api(`/pages/${nestedPageId}/ydoc`, { method: 'GET', raw: true, ...as })
+let nestedNode
+try {
+  nestedNode = yXmlFragmentToProseMirrorRootNode(
+    buildDoc(decodeFrames(nestedDoc.bytes)).getXmlFragment('blocknote'), schema)
+  nestedNode.check()
+  check('node.check() ผ่าน', true)
+} catch (error) {
+  check('node.check() ผ่าน', false, error.message)
+}
+
+if (nestedNode) {
+  check('ข้อความทุกชั้นไม่หาย',
+    ['แม่', 'ลูก', 'หลาน', 'แม่คนที่สอง'].every((t) => nestedNode.textContent.includes(t)),
+    JSON.stringify(nestedNode.textContent))
+
+  const top = nestedNode.firstChild
+  check('ระดับบนสุดมีสองรายการ ไม่ใช่สี่ (ซ้อนจริง ไม่ได้แบน)',
+    top?.childCount === 2, `ได้ ${top?.childCount}`)
+
+  const parent = top?.child(0)
+  check('รายการแม่มี blockGroup ลูกอยู่ข้าง ๆ เนื้อหา',
+    parent?.childCount === 2 && parent.child(1)?.type.name === 'blockGroup',
+    `childCount=${parent?.childCount} second=${parent?.child(1)?.type.name}`)
+
+  // ไม่มี blockGroup ว่างสักอันในเอกสาร — ตัวที่ว่างคือตัวที่จะถูกลบทิ้ง
+  let emptyGroups = 0
+  nestedNode.descendants((n) => {
+    if (n.type.name === 'blockGroup' && n.childCount === 0) emptyGroups += 1
+  })
+  check('ไม่มี blockGroup ว่างเลยสักอัน', emptyGroups === 0, `เจอ ${emptyGroups}`)
+
+  const blocks = collectBlocks(nestedNode.firstChild)
+  check('ลำดับชนิดบล็อกตรงกับ markdownToHTML ของ BlockNote',
+    JSON.stringify(blocks.map((b) => b.type.name))
+      === JSON.stringify(expectedBlockTypes(await markdownToHTML(nestedMarkdown))),
+    JSON.stringify(blocks.map((b) => b.type.name)))
+}
+
+const tooDeep = await api(`/pages/${nestedPageId}/content/markdown`, {
+  body: {
+    markdown: ['- ก', '  - ข', '    - ค', '      - ง', '        - จ', ''].join('\n'),
+  },
+  ...as,
+})
+check('ซ้อนลึกเกินเพดาน → ยังเขียนได้แต่เตือนกลับ',
+  tooDeep.status === 200 && (tooDeep.body?.data?.warnings?.length ?? 0) > 0,
+  JSON.stringify(tooDeep.body?.data))
+
+const deepDoc = await api(`/pages/${nestedPageId}/ydoc`, { method: 'GET', raw: true, ...as })
+const deepNode = yXmlFragmentToProseMirrorRootNode(
+  buildDoc(decodeFrames(deepDoc.bytes)).getXmlFragment('blocknote'), schema)
+try {
+  deepNode.check()
+  check('เอกสารยังถูกต้องหลังปรับความลึก', true)
+} catch (error) {
+  check('เอกสารยังถูกต้องหลังปรับความลึก', false, error.message)
+}
+check('ข้อความของชั้นที่ลึกเกินไม่หาย',
+  ['ก', 'ข', 'ค', 'ง', 'จ'].every((t) => deepNode.textContent.includes(t)),
+  JSON.stringify(deepNode.textContent))
+
+section('⚠️ codeBlock ต้องไม่มี mark เด็ดขาด')
+// ═══════════════════════════════════════════════════════════════════════════
+//  ทดลองแล้วว่านี่คือรูปร่างเดียวที่ทำเอกสาร "ว่างทั้งหน้า":
+//  schema ของ codeBlock คือ marks:"" — ใส่ mark เข้าไปแล้วข้อความถูกลบ
+//  → codeBlock ว่าง → blockGroup ว่าง → node.check() พังที่ระดับ doc
+// ═══════════════════════════════════════════════════════════════════════════
+
+const codePage = await api('/pages', { body: { parentId: null, title: 'โค้ดที่มี markdown ข้างใน' }, ...as })
+const codePageId = codePage.body?.data?.id
+
+const trickySource = 'ตัวอย่าง **ไม่ควรกลายเป็นตัวหนา** และ [ไม่ใช่ลิงก์](http://x.test)'
+const tricky = await api(`/pages/${codePageId}/content/markdown`, {
+  body: { markdown: ['```text', trickySource, '```', ''].join('\n') }, ...as,
+})
+check('เขียนโค้ดบล็อกที่มีสัญลักษณ์ markdown ข้างในได้', tricky.status === 200, JSON.stringify(tricky.body))
+
+const codeDoc = await api(`/pages/${codePageId}/ydoc`, { method: 'GET', raw: true, ...as })
+let codeNode
+try {
+  codeNode = yXmlFragmentToProseMirrorRootNode(
+    buildDoc(decodeFrames(codeDoc.bytes)).getXmlFragment('blocknote'), schema)
+  codeNode.check()
+  check('node.check() ผ่าน (เอกสารไม่ว่าง)', true)
+} catch (error) {
+  check('node.check() ผ่าน (เอกสารไม่ว่าง)', false, error.message)
+}
+
+if (codeNode) {
+  const block = collectBlocks(codeNode.firstChild)[0]
+  check('ข้อความในโค้ดบล็อกรอดครบทุกไบต์ ไม่ถูกตีความเป็น markdown',
+    block?.textContent === trickySource, JSON.stringify(block?.textContent))
+
+  let markCount = 0
+  block?.descendants((n) => { markCount += n.marks.length })
+  check('ไม่มี mark สักตัวในโค้ดบล็อก', markCount === 0, `เจอ ${markCount}`)
+}
+
+section('markdown ที่รองรับไม่ได้ต้องลดรูปแล้วรายงาน ไม่ใช่ทิ้งเงียบ ๆ')
+// ผู้เรียกคือ LLM ที่มองผลลัพธ์ไม่เห็น — เงียบแปลว่ามันเชื่อว่าเขียนตารางไปแล้ว
+
+const degradePage = await api('/pages', { body: { parentId: null, title: 'ของที่รับไม่ได้' }, ...as })
+const degradePageId = degradePage.body?.data?.id
+
+const withTable = [
+  '| สาขา | ยอดขาย |',
+  '|---|---|',
+  '| รังสิต | 120,000 |',
+  '',
+].join('\n')
+
+const degraded = await api(`/pages/${degradePageId}/content/markdown`, {
+  body: { markdown: withTable }, ...as,
+})
+check('ตาราง → 200 ไม่ใช่ 400', degraded.status === 200, JSON.stringify(degraded.body))
+check('บอกกลับว่าถูกลดรูปอะไรไป',
+  Array.isArray(degraded.body?.data?.warnings) && degraded.body.data.warnings.length > 0,
+  JSON.stringify(degraded.body?.data))
+
+const degradedDoc = await api(`/pages/${degradePageId}/ydoc`, { method: 'GET', raw: true, ...as })
+const degradedNode = yXmlFragmentToProseMirrorRootNode(
+  buildDoc(decodeFrames(degradedDoc.bytes)).getXmlFragment('blocknote'), schema)
+check('ข้อมูลในตารางไม่หาย', degradedNode.textContent.includes('รังสิต')
+  && degradedNode.textContent.includes('120,000'), JSON.stringify(degradedNode.textContent))
+
+section('markdown เขียนซ้ำต้องต่อท้าย และค้นหาต้องเจอ')
+
+const mdAgain = await api(`/pages/${mdPageId}/content/markdown`, {
+  body: { markdown: '## หัวข้อที่เพิ่มทีหลัง\n' }, ...as,
+})
+check('เขียน markdown รอบสองได้', mdAgain.status === 200, JSON.stringify(mdAgain.body))
+
+const mdDoc2 = await api(`/pages/${mdPageId}/ydoc`, { method: 'GET', raw: true, ...as })
+const mdNode2 = yXmlFragmentToProseMirrorRootNode(
+  buildDoc(decodeFrames(mdDoc2.bytes)).getXmlFragment('blocknote'), schema)
+check('ของเดิมยังอยู่ครบ', mdNode2.textContent.includes('รายงานประจำสัปดาห์')
+  && mdNode2.textContent.includes('หัวข้อที่เพิ่มทีหลัง'), JSON.stringify(mdNode2.textContent))
+
+// คำกลางประโยค — คำต้นประโยคผ่านได้แม้ tokenizer พัง (prefix match)
+const mdFound = await api(`/search?q=${encodeURIComponent('บัญชี')}`, { method: 'GET', ...as })
+check('ค้นคำกลางประโยคจาก markdown ที่เพิ่งเขียนเจอ',
+  mdFound.body?.data?.hits?.some((h) => h.id === mdPageId), JSON.stringify(mdFound.body?.data))
+
+const mdRead = await api(`/pages/${mdPageId}/content`, { method: 'GET', ...as })
+// AI ต้องอ่านซอร์สผังงานกลับมาได้ ไม่งั้นมันแก้ผังที่ตัวเองเขียนไม่ได้
+check('อ่านกลับมาเห็นซอร์สของผังงานด้วย',
+  mdRead.body?.data?.bodyText?.includes('เริ่มงาน'), mdRead.body?.data?.bodyText)
+// ⚠️ projection ฝั่งเซิร์ฟเวอร์ห้ามมี marker — เบราว์เซอร์เขียนทับด้วย blocksToPlainText()
+//    ที่ไม่มี marker ถ้าเซิร์ฟเวอร์ใส่ '# ' ผลค้นหาจะสลับรูปแบบทุกครั้งที่มีคนเปิดหน้า
+check('projection ไม่มี marker ของ markdown ปนมา',
+  !/(^|\n)#{1,6}\s/.test(mdRead.body?.data?.bodyText ?? '')
+  && !/(^|\n)[-*]\s/.test(mdRead.body?.data?.bodyText ?? ''),
+  JSON.stringify(mdRead.body?.data?.bodyText))
+
+section('เพดานของ markdown')
+
+const tooLong = await api(`/pages/${mdPageId}/content/markdown`, {
+  body: { markdown: 'ก'.repeat(100_001) }, ...as,
+})
+check('markdown ยาวเกินเพดาน → 400', tooLong.status === 400, `ได้ ${tooLong.status} ${tooLong.body?.code}`)
+
+const emptyMd = await api(`/pages/${mdPageId}/content/markdown`, { body: { markdown: '   \n\n' }, ...as })
+check('markdown ว่างล้วน → 400', emptyMd.status === 400, `ได้ ${emptyMd.status} ${emptyMd.body?.code}`)
 
 section('⚠️ tenant isolation')
 

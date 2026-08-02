@@ -1,8 +1,10 @@
 using YDotNet.Document;
+using YDotNet.Document.Cells;
 using YDotNet.Document.Options;
 using YDotNet.Document.Transactions;
 using YDotNet.Document.Types.XmlElements;
 using YDotNet.Document.Types.XmlFragments;
+using YDotNet.Document.Types.XmlTexts;
 
 namespace ProjectManagementAPI.Services;
 
@@ -12,14 +14,18 @@ namespace ProjectManagementAPI.Services;
 //  นี่คือจุดเดียวในระบบที่เซิร์ฟเวอร์ "เขียน" Yjs — ทุกที่อื่นมองมันเป็น bytea
 //  ทึบ ๆ โดยเจตนา (PLAN.md การตัดสินใจข้อ 1) จึงมีกฎเข้มกว่าปกติ
 //
-//  ⚠️ ขอบเขต: ย่อหน้าธรรมดาเท่านั้น ไม่มี heading / list / table / mark / การซ้อนชั้น
+//  ⚠️ ขอบเขต: heading / list / quote / codeBlock / divider / paragraph
+//     ยังไม่มี mark (ตัวหนา เอียง ลิงก์) ตาราง รูป และการซ้อนชั้น
 //
-//     ไม่ใช่ความขี้เกียจ — schema ของ BlockNote นิยามใน TypeScript และเป็น 0.x
-//     ที่ minor bump breaking ได้ การ clone schema ทั้งชุดมาเป็น C# คือการลอก
-//     blockToNode.ts + block spec ทุกตัวด้วยมือ โดยไม่มีอะไรตรวจว่าตรงกัน
+//     เดิมรับแค่ย่อหน้าเพราะ "ไม่มีอะไรตรวจว่ารูปร่างตรงกับ blockToNode.ts"
 //     (`@blocknote/server-util` ตายที่ 0.27.2 ขณะที่โปรเจกต์ pin 0.52.1)
+//     ตอนนี้มีแล้ว: `@blocknote/core` export `markdownToHTML()` ซึ่งเป็น parser
+//     ที่ BlockNote เขียนเอง ไม่มี dependency และรันใน Node เปล่า ๆ ได้
+//     scripts/verify-blocknote-append.mjs จึงเทียบลำดับชนิดบล็อกที่ออกจากที่นี่
+//     กับ parser ของ BlockNote เอง ไม่ใช่กับสิ่งที่เราคิดว่าถูก
 //
-//     ย่อหน้าธรรมดามีรูปร่างเดียวและตรวจได้ครบด้วยเทสจริง จึงปลอดภัยพอจะปล่อย
+//     ⚠️ ยังคงเป็นชุดที่ "ปิด" ไม่ใช่การรองรับทุกอย่าง — ทุกชนิดที่เพิ่มต้องผ่าน
+//        node.check() **และ** การ assert textContent ก่อนถือว่าใช้ได้ (ดูด้านล่าง)
 //
 //  ⚠️ รูปร่างที่ผิดทำข้อมูลหายจริง ไม่ใช่แค่ render พลาด — สองแบบ:
 //
@@ -34,6 +40,10 @@ namespace ProjectManagementAPI.Services;
 //  ⚠️ scripts/verify-blocknote-append.mjs ตรวจ bytes ที่ออกจากที่นี่ด้วย schema
 //     จริงของ BlockNote แล้วเรียก node.check() ซึ่งเป็นตัวเดียวที่จับรูปร่างผิดได้
 //     (yXmlFragmentToProseMirrorRootNode เองไม่ validate — พิสูจน์แล้ว)
+//
+//  ⚠️ แต่ node.check() "ไม่พอ" — ทดลองแล้วว่าถ้าใส่ชื่อ mark หรือ attribute
+//     ที่ schema ไม่รู้จัก y-prosemirror จะลบข้อความทิ้งแล้ว check() ยังผ่าน
+//     ทุกเคสจึงต้อง assert textContent ด้วยเสมอ ไม่ใช่แค่ check()
 // ═══════════════════════════════════════════════════════════════════════════
 public static class BlockNoteWriter
 {
@@ -42,7 +52,6 @@ public static class BlockNoteWriter
 
     private const string BlockGroup = "blockGroup";
     private const string BlockContainer = "blockContainer";
-    private const string Paragraph = "paragraph";
 
     /// <summary>
     /// Yjs clientID ที่จองไว้ให้เซิร์ฟเวอร์
@@ -96,6 +105,27 @@ public static class BlockNoteWriter
     {
         ArgumentNullException.ThrowIfNull(paragraphs);
 
+        return BuildAppendUpdate(existingUpdates,
+            [.. paragraphs.Select(text => new BlockDraft(
+                MarkdownToBlockNote.Paragraph, ParagraphAttributes, text, [], []))]);
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> ParagraphAttributes
+        = new Dictionary<string, string>();
+
+    /// <summary>
+    /// สร้าง Yjs update ที่ต่อท้ายบล็อกหลายชนิดเข้าไปในเอกสาร
+    /// </summary>
+    /// <param name="existingUpdates">
+    /// update ทั้งหมดของเอกสารตามลำดับ (snapshot ก่อน แล้วตามด้วย update ที่เหลือ)
+    /// ว่างได้ = เอกสารใหม่ที่ยังไม่มีอะไรเลย
+    /// </param>
+    /// <param name="blocks">โครงบล็อกจาก <see cref="MarkdownToBlockNote"/></param>
+    public static AppendUpdate BuildAppendUpdate(
+        IReadOnlyList<byte[]> existingUpdates, IReadOnlyList<BlockDraft> blocks)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
+
         // ─────────────────────────────────────────────────────────────────
         //  ⚠️ สุ่ม clientID ใหม่ "ทุกครั้ง" ห้ามใช้ค่าคงที่
         //
@@ -146,35 +176,12 @@ public static class BlockNoteWriter
             before = read.StateVectorV1();
         }
 
-        // ─── 2) เขียนย่อหน้าต่อท้าย ───────────────────────────────────────
+        // ─── 2) เขียนบล็อกต่อท้าย ────────────────────────────────────────
         using (var write = doc.WriteTransaction(origin: null!))
         {
             var group = EnsureBlockGroup(write, fragment);
 
-            var index = group.ChildLength(write);
-
-            foreach (var text in paragraphs)
-            {
-                var container = group.InsertElement(write, index, BlockContainer);
-
-                // id เป็น attribute เดียวที่ schema บังคับ — ตัวอื่น (textColor,
-                // backgroundColor, textAlignment) มี default ใน schema อยู่แล้ว
-                // ProseMirror จึงเติมให้เอง การใส่มาเองมีแต่จะเพิ่มโอกาสสะกดผิด
-                container.InsertAttribute(write, "id", Guid.CreateVersion7().ToString());
-
-                var paragraph = container.InsertElement(write, 0, Paragraph);
-
-                // ย่อหน้าว่างต้องไม่มี XmlText เลย ไม่ใช่ XmlText ที่ว่าง —
-                // ProseMirror ไม่มี text node ที่ยาว 0 และการใส่เข้าไปทำให้
-                // node.check() ไม่ผ่าน
-                if (text.Length > 0)
-                {
-                    var content = paragraph.InsertText(write, 0);
-                    content.Insert(write, 0, text, null!);
-                }
-
-                index++;
-            }
+            WriteBlocks(write, group, blocks, group.ChildLength(write));
 
             write.Commit();
         }
@@ -182,6 +189,112 @@ public static class BlockNoteWriter
         // ─── 3) เอาเฉพาะส่วนต่าง ─────────────────────────────────────────
         using var diff = doc.ReadTransaction();
         return new AppendUpdate(diff.StateDiffV1(before), clientId);
+    }
+
+    /// <summary>เขียนบล็อกลง blockGroup ที่ให้มา ตั้งแต่ตำแหน่ง <paramref name="startIndex"/></summary>
+    private static void WriteBlocks(
+        Transaction write, XmlElement group,
+        IReadOnlyList<BlockDraft> blocks, uint startIndex)
+    {
+        var index = startIndex;
+
+        foreach (var block in blocks)
+        {
+            var container = group.InsertElement(write, index, BlockContainer);
+
+            // id เป็น attribute เดียวที่ schema บังคับ — ตัวอื่น (textColor,
+            // backgroundColor, textAlignment) มี default ใน schema อยู่แล้ว
+            // ProseMirror จึงเติมให้เอง การใส่มาเองมีแต่จะเพิ่มโอกาสสะกดผิด
+            container.InsertAttribute(write, "id", Guid.CreateVersion7().ToString());
+
+            var content = container.InsertElement(write, 0, block.Tag);
+
+            // ⚠️ attribute ของ Yjs เป็นสตริงเสมอ (InsertAttribute รับได้แค่ string)
+            //    เบราว์เซอร์จึงได้ level = "2" ไม่ใช่ 2 — render ถูกเพราะ BlockNote
+            //    ต่อสตริง ("h" + "2") และ ProseMirror ไม่ validate ชนิดของ attr
+            //    อย่า "แก้" ให้เป็นตัวเลข เพราะเขียนแบบนั้นไม่ได้
+            foreach (var (name, value) in block.Attributes)
+            {
+                content.InsertAttribute(write, name, value);
+            }
+
+            // ⚠️ null หรือว่าง = ไม่มี text node เลย ไม่ใช่ text node ที่ยาว 0
+            //    ProseMirror ไม่มี text node ว่าง การใส่เข้าไปทำให้ check() ไม่ผ่าน
+            if (block.Text is { Length: > 0 } text)
+            {
+                var xmlText = content.InsertText(write, 0);
+
+                // ⚠️ Insert ครั้งเดียว แล้วค่อย Format เป็นช่วง ๆ
+                //
+                //    Insert ที่ attributes เป็น null "สืบทอดรูปแบบจากตำแหน่งนั้น"
+                //    (พฤติกรรมของ Yjs ไม่ใช่ของเรา) ถ้าเขียนทีละช่วงด้วย Insert
+                //    ข้อความที่ตามหลังช่วงตัวหนาจะกลายเป็นตัวหนาไปด้วยเงียบ ๆ
+                //    การ Format ทับทีหลังไม่มีปัญหานี้ — พิสูจน์แล้วใน spike-marks
+                xmlText.Insert(write, 0, text, null!);
+                ApplyMarks(write, xmlText, block);
+            }
+
+            // ─────────────────────────────────────────────────────────────
+            //  ลิสต์ซ้อนชั้น — blockGroup ลูกอยู่ "ข้าง ๆ" เนื้อหา ไม่ใช่ข้างใน
+            //  (schema: blockContainer = blockContent blockGroup?)
+            //
+            //  ⚠️ เขียนเฉพาะเมื่อมีลูกจริง — blockGroup ที่ว่างผิด content
+            //     expression (blockGroupChild+) แล้ว y-prosemirror จะลบมันทิ้ง
+            //     ซึ่งเป็นการลบที่กระจายไปทุกเครื่อง
+            // ─────────────────────────────────────────────────────────────
+            if (block.Children.Count > 0)
+            {
+                var childGroup = container.InsertElement(write, 1, BlockGroup);
+                WriteBlocks(write, childGroup, block.Children, 0);
+            }
+
+            index++;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ใส่ตัวหนา/เอียง/ขีดฆ่า/โค้ด/ลิงก์
+    //
+    //  ⚠️ ชื่อ mark ต้องตรงกับ defaultStyleSpecs ของ BlockNote เป๊ะ
+    //     ชื่อที่ schema ไม่รู้จักทำให้ "ข้อความช่วงนั้นถูกลบทิ้ง" โดยที่
+    //     node.check() ยังผ่าน — เป็นความเสียหายที่มองไม่เห็นจากฝั่งเซิร์ฟเวอร์เลย
+    //     verify-blocknote-append.mjs จึง assert textContent ทุกเคส ไม่ใช่แค่ check()
+    //
+    //  ⚠️ ค่าของ mark คือ "attrs object" ของมัน ไม่ใช่ true — bold/italic/strike/code
+    //     ใช้ object ว่าง ส่วน link ต้องมี { href }
+    //
+    //  offset เป็นหน่วย UTF-16 code unit ตรงกับ C# string.Length และ yjs
+    //  (DocOptions.Encoding เป็น Utf16 โดยปริยาย — ห้ามไปตั้งเป็น Utf8)
+    // ═══════════════════════════════════════════════════════════════════════
+    private static void ApplyMarks(Transaction write, XmlText xmlText, BlockDraft block)
+    {
+        if (block.Runs.Count == 0) return;
+
+        // ⚠️ กันไว้อีกชั้นถึงแม้ MarkdownToBlockNote จะไม่มีทางสร้าง run ให้ codeBlock
+        //    เพราะนี่คือรูปร่างเดียวที่ทำให้ "เอกสารว่างทั้งหน้า" ไม่ใช่แค่บล็อกเดียวพัง
+        if (string.Equals(block.Tag, MarkdownToBlockNote.CodeBlock, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var length = block.Text?.Length ?? 0;
+
+        foreach (var run in block.Runs)
+        {
+            var start = Math.Clamp(run.Start, 0, length);
+            var end = Math.Clamp(run.Start + run.Length, start, length);
+            if (end == start) continue;
+
+            var attrs = new Dictionary<string, Input>
+            {
+                [run.Name] = run.Href is { } href
+                    ? Input.Object(new Dictionary<string, Input> { ["href"] = Input.String(href) })
+                    : Input.Object(new Dictionary<string, Input>()),
+            };
+
+            using var input = Input.Object(attrs);
+            xmlText.Format(write, (uint)start, (uint)(end - start), input);
+        }
     }
 
     /// <summary>

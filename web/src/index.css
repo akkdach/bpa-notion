@@ -108,3 +108,85 @@
     overflow-wrap: break-word;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ผังงาน mermaid ในเอกสาร
+
+   วาดทับ codeBlock ด้วย ProseMirror decoration — ไม่ได้แก้ schema
+   (เหตุผลอยู่ใน features/editor/components/mermaidPreview.ts)
+
+   ⚠️ อยู่นอก @layer base โดยเจตนา — ต้องชนะ style ของ @blocknote/shadcn
+      ที่ตั้ง display ของ pre ไว้ ถ้าอยู่ใน base จะโดนทับแล้วซ่อนซอร์สไม่สำเร็จ
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bn-mermaid {
+  position: relative;
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.bn-mermaid-canvas {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+.bn-mermaid-canvas svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.bn-mermaid-toggle {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  z-index: 1;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+/* ปุ่มโผล่เมื่อชี้ หรือเมื่อกำลังดูซอร์ส (ไม่งั้นกดกลับไม่ได้บนจอสัมผัส) */
+.bn-mermaid:hover .bn-mermaid-toggle,
+.bn-mermaid-toggle:focus-visible,
+.bn-mermaid-editing .bn-mermaid-toggle {
+  opacity: 1;
+}
+
+/* ⚠️ ซ่อนด้วย display:none ไม่ใช่ visibility — ต้องไม่กินที่ว่างใต้แผนภาพ
+   และ ProseMirror ยังจัดการ node นี้ได้ตามปกติเพราะเอกสารไม่ได้เปลี่ยน */
+.bn-mermaid-source-hidden {
+  display: none;
+}
+
+.bn-mermaid-error {
+  color: var(--destructive);
+}
+
+.bn-mermaid-error-label {
+  margin-bottom: 0.375rem;
+  font-size: 0.8125rem;
+}
+
+/* ⚠️ ซอร์สต้องแสดงเต็ม ๆ เสมอเมื่อวาดไม่สำเร็จ — กล่องเปล่าทำให้ผู้ใช้
+   ไม่รู้ว่าต้องแก้อะไร และผังงานที่ AI เขียนพังบ่อยกว่าที่คิด */
+.bn-mermaid-error-body pre {
+  overflow-x: auto;
+  padding: 0.5rem;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--foreground);
+  white-space: pre-wrap;
+}

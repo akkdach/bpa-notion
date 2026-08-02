@@ -127,6 +127,25 @@ public class PageDocumentsController(IDocumentService documents) : ControllerBas
         => (await documents.AppendParagraphsAsync(pageId, request.Paragraphs ?? [], ct))
             .ToActionResult();
 
+    /// <summary>ต่อท้ายเนื้อหาที่เขียนเป็น markdown</summary>
+    /// <remarks>
+    /// รองรับหัวข้อ รายการ คำพูดอ้างอิง บล็อกโค้ด และเส้นคั่น
+    /// ` ```mermaid ` จะแสดงเป็นแผนภาพจริงในเบราว์เซอร์
+    ///
+    /// ⚠️ ตาราง/รูป/HTML ถูกลดรูปเป็นบล็อกโค้ดแล้วรายงานกลับทาง warnings
+    ///    ไม่ใช่ปฏิเสธทั้งคำขอ — ดูเหตุผลที่ IDocumentService
+    ///
+    /// ⚠️ ต่อท้ายเท่านั้น แก้หรือลบของเดิมไม่ได้
+    /// </remarks>
+    [HttpPost("content/markdown")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> AppendMarkdown(
+        Guid pageId, AppendMarkdownRequest request, CancellationToken ct)
+        => (await documents.AppendMarkdownAsync(pageId, request.Markdown ?? string.Empty, ct))
+            .ToActionResult();
+
     /// <summary>
     /// plain text ที่ client แกะจาก Y.Doc — ใช้ทำ index ค้นหาและ title ใน sidebar
     /// client ควรส่งหลังผู้ใช้หยุดพิมพ์สักครู่ ไม่ใช่ทุก keystroke

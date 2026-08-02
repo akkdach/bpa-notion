@@ -251,8 +251,8 @@ public sealed class PmClient(IConfiguration configuration)
             new { body }, ct);
 
     /// <summary>ต่อท้ายย่อหน้าเข้าไปในเนื้อหาหน้าจริง (ไม่ใช่บันทึก)</summary>
-    public Task<AppendResult> AppendParagraphsAsync(
-        Guid pageId, IReadOnlyList<string> paragraphs, CancellationToken ct)
+    public Task<AppendResult> AppendMarkdownAsync(
+        Guid pageId, string markdown, CancellationToken ct)
         => SendAsync<AppendResult>(HttpMethod.Post,
-            $"/api/v1/pages/{pageId}/content/paragraphs", new { paragraphs }, ct);
+            $"/api/v1/pages/{pageId}/content/markdown", new { markdown }, ct);
 }

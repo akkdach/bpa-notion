@@ -380,23 +380,42 @@ public static class TaskTools
         return $"เขียนบันทึกแล้วเมื่อ {note.CreatedAt:yyyy-MM-dd HH:mm}  หน้า id={pageId}";
     });
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  ⚠️ รับ markdown เป็นสตริงเดียว ไม่ใช่ string[] และไม่มีพารามิเตอร์ format
+    //
+    //     markdown เป็น superset ของข้อความธรรมดาอยู่แล้ว — ข้อความที่ไม่มี
+    //     สัญลักษณ์อะไรเลยกลายเป็นย่อหน้าตามเดิม จึงไม่ต้องมีสวิตช์ให้เลือกผิด
+    //     และ schema ของทุก tool นั่งอยู่ใน system prompt ของทุก session
+    //     ในโฟลเดอร์นี้ตลอดไป (ดูคอมเมนต์หัวไฟล์) — enum ที่ไม่จำเป็นมีราคา
+    // ─────────────────────────────────────────────────────────────────────
     [McpServerTool(Name = "append_content")]
-    [Description("ต่อท้ายย่อหน้าเข้าไปใน \"เนื้อหาของหน้า\" จริง ๆ (ต่างจาก add_note ที่เขียน " +
-                 "เป็นบันทึกแยกใต้เอกสาร). รับได้เฉพาะย่อหน้าธรรมดา — ไม่มีหัวข้อ รายการ ตาราง " +
-                 "หรือตัวหนา/เอียง. ต่อท้ายอย่างเดียว แก้หรือลบของเดิมไม่ได้")]
+    [Description("ต่อท้ายเนื้อหาเข้าไปใน \"เนื้อหาของหน้า\" จริง ๆ (ต่างจาก add_note ที่เขียน " +
+                 "เป็นบันทึกแยกใต้เอกสาร). รับ markdown: หัวข้อ (#), รายการ (-, 1., - [x]), " +
+                 "คำพูด (>), เส้นคั่น (---), ตัวหนา/เอียง/ขีดฆ่า/โค้ด/ลิงก์ และบล็อกโค้ด (```). " +
+                 "```mermaid จะแสดงเป็นแผนภาพจริงในเบราว์เซอร์ — ใช้วาดผังงาน ผังลำดับ แกนต์ได้. " +
+                 "ตาราง/รูป/HTML จะถูกลดรูปแล้วรายงานกลับ. ต่อท้ายอย่างเดียว แก้หรือลบของเดิมไม่ได้")]
     public static Task<string> AppendContent(
         PmClient client,
         [Description("id ของหน้า")] Guid pageId,
-        [Description("ข้อความ ย่อหน้าละหนึ่งรายการ (ไม่เกิน 50 ย่อหน้าต่อครั้ง)")] string[] paragraphs,
+        [Description("เนื้อหาเป็น markdown (ไม่เกิน 100,000 ตัวอักษร และ 200 บล็อกต่อครั้ง)")]
+        string markdown,
         CancellationToken ct = default) => Run(async () =>
     {
-        if (paragraphs.Length == 0)
-            return "ไม่มีย่อหน้าให้เขียน — ระบุอย่างน้อยหนึ่งย่อหน้า";
+        if (string.IsNullOrWhiteSpace(markdown))
+            return "ไม่มีเนื้อหาให้เขียน — ระบุข้อความอย่างน้อยหนึ่งบรรทัด";
 
-        var result = await client.AppendParagraphsAsync(pageId, paragraphs, ct);
+        var result = await client.AppendMarkdownAsync(pageId, markdown, ct);
 
-        return $"เขียน {result.ParagraphCount} ย่อหน้าต่อท้ายเนื้อหาหน้าแล้ว  id={pageId}\n" +
-               "(ผู้ใช้จะเห็นในเอกสารทันทีที่เปิดหน้านั้น)";
+        var message = $"เขียน {result.BlockCount} บล็อกต่อท้ายเนื้อหาหน้าแล้ว  id={pageId}";
+
+        // ⚠️ ต้องรายงานสิ่งที่ถูกลดรูปกลับไปเสมอ — ผู้อ่านคือโมเดลที่มองผลลัพธ์
+        //    ไม่เห็น ถ้าเงียบมันจะเชื่อว่าเขียนตารางลงไปแล้วจริง ๆ
+        if (result.Warnings.Count > 0)
+        {
+            message += "\n" + string.Join("\n", result.Warnings.Select(w => $"⚠️ {w}"));
+        }
+
+        return message + "\n(ผู้ใช้จะเห็นในเอกสารทันทีที่เปิดหน้านั้น)";
     });
 
     [McpServerTool(Name = "restore_page")]

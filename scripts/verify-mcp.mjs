@@ -322,7 +322,18 @@ try {
 
   // ─── เขียนเนื้อหาในหน้าจริง ─────────────────────────────────────────────
   const appended = await callTool('append_content', {
-    pageId: taskId, paragraphs: ['ย่อหน้าที่ AI เขียนลงเนื้อหาหน้า'],
+    pageId: taskId,
+    markdown: [
+      '## สรุปที่ AI เขียน',
+      '',
+      '- ตรวจแล้วเรียบร้อย',
+      '',
+      '```mermaid',
+      'graph TD',
+      '  A[เริ่ม] --> B[จบ]',
+      '```',
+      '',
+    ].join('\n'),
   })
   check('append_content เขียนเนื้อหาลงหน้าได้',
     !appended.isError && appended.text.includes('ต่อท้ายเนื้อหาหน้าแล้ว'),
@@ -330,7 +341,25 @@ try {
 
   const readAfter = await callTool('get_page', { pageId: taskId })
   check('get_page อ่านเนื้อหาที่เพิ่งเขียนกลับมาได้',
-    readAfter.text.includes('ย่อหน้าที่ AI เขียนลงเนื้อหาหน้า'), readAfter.text)
+    readAfter.text.includes('สรุปที่ AI เขียน'), readAfter.text)
+
+  // AI ต้องอ่านซอร์สผังงานที่ตัวเองเขียนกลับมาได้ ไม่งั้นแก้ผังของตัวเองไม่ได้
+  check('ซอร์สของผังงานอ่านกลับมาได้ด้วย',
+    readAfter.text.includes('graph TD'), readAfter.text)
+
+  // ⚠️ ของที่ schema รับไม่ได้ต้อง "สำเร็จแล้วเตือน" ไม่ใช่ล้มเหลว
+  //    โมเดลมองผลลัพธ์ไม่เห็น การเงียบแปลว่ามันเชื่อว่าเขียนตารางไปแล้ว
+  const withTable = await callTool('append_content', {
+    pageId: taskId,
+    markdown: '| สาขา | ยอด |\n|---|---|\n| รังสิต | 120 |\n',
+  })
+  check('ตารางเขียนได้แต่บอกกลับว่าถูกลดรูป',
+    !withTable.isError && withTable.text.includes('⚠️'),
+    withTable.text || JSON.stringify(withTable.error))
+
+  const emptyContent = await callTool('append_content', { pageId: taskId, markdown: '   ' })
+  check('เนื้อหาว่างเปล่า → ข้อความบอกเหตุผล ไม่ใช่ crash',
+    emptyContent.text.includes('ไม่มีเนื้อหา'), emptyContent.text)
 
   // ─── ย้าย / ลบ / กู้คืน ──────────────────────────────────────────────────
   console.log(`\n${C.yellow}── จัดการโครงสร้าง ──${C.off}`)

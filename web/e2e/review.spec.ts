@@ -182,7 +182,12 @@ test('ฟีดบอกได้ว่าอะไร AI ทำ และกร
   await main.getByRole('button', { name: '👤 เฉพาะที่คนทำ' }).click()
   await expect(page).toHaveURL(/actor=human/)
   // เจ้าของยังไม่ได้ทำอะไรนอกจากสร้าง workspace — ไม่ควรเห็นงานของ AI
-  await expect(main.getByText('Claude (AI)')).toBeHidden()
+  //
+  // ⚠️ toHaveCount(0) ไม่ใช่ toBeHidden() — toBeHidden กับ locator ที่แมตช์
+  //    หลายตัวเป็น strict mode violation (โยนทันที ไม่รอ) การกด filter เปลี่ยน
+  //    URL ก่อนที่ react-query จะ refetch เสร็จ ข้อความเก่าจึงยังค้างอยู่เสี้ยววินาที
+  //    แล้วเทสล้มแบบไม่คงที่ ส่วน toHaveCount รอจนกว่าจะจริงหรือหมดเวลา
+  await expect(main.getByText('Claude (AI)')).toHaveCount(0)
 
   await main.getByRole('button', { name: '🤖 เฉพาะที่ AI ทำ' }).click()
   await expect(page).toHaveURL(/actor=agent/)

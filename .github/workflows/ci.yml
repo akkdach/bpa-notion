@@ -303,8 +303,19 @@ jobs:
       # ⚠️ จุดเดียวที่เซิร์ฟเวอร์เขียน Yjs — รูปร่างผิดทำข้อมูลหายจริง ไม่ใช่ render พลาด
       #    เคสตัดสินคือ node.check() กับ schema จริงของ BlockNote
       #    (yXmlFragmentToProseMirrorRootNode เองไม่ validate — พิสูจน์แล้ว)
-      - name: verify-blocknote-append (เขียนเนื้อหาแล้วโหลดกลับด้วย schema จริง)
+      #
+      #    ⚠️ และ check() อย่างเดียว "ไม่พอ" — ชื่อ mark หรือ node ที่ schema ไม่รู้จัก
+      #       ทำให้ข้อความถูกลบทิ้งโดยที่ check() ยังผ่าน ทุกเคสจึง assert textContent ด้วย
+      #
+      #    ลำดับชนิดบล็อกถูกเทียบกับ markdownToHTML() ของ @blocknote/core เอง
+      #    ไม่ใช่กับสิ่งที่เราคิดว่าถูก
+      - name: verify-blocknote-append (markdown → บล็อก, ตรวจด้วย schema จริง)
         run: node scripts/verify-blocknote-append.mjs "$API_BASE"
+
+      # ตอบคำถามเดียว: mark ที่ YDotNet เขียน yjs 13.x อ่านออกไหม
+      # ถ้าข้อนี้แดง แปลว่า interop ระหว่าง yrs กับ yjs เปลี่ยนไป ไม่ใช่โค้ดเราพัง
+      - name: spike-marks (mark จาก C# ข้ามไปฝั่ง yjs ได้จริง)
+        run: dotnet run scripts/spike-marks.cs | node scripts/spike-marks.mjs
 
       # ⚠️ เคสสำคัญ: ลบถาวรหน้าที่มีประวัติแล้วประวัติต้องยังอยู่
       #    FK เป็น ON DELETE SET NULL (page_id) — ถ้าเป็น SET NULL เปล่า ๆ

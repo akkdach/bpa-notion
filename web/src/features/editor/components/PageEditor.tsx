@@ -15,6 +15,7 @@ import { Cloud, CloudOff, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useResolvedTheme } from '@/features/settings'
 import type { DocStatus } from '../hooks/useYDoc'
+import { MermaidPreview } from './mermaidPreview'
 
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/shadcn/style.css'
@@ -72,8 +73,22 @@ export function PageEditor({ doc, status, editable, onChangeProjection }: PageEd
         fragment,
         user: { name: '', color: '' },
       },
+      // ─────────────────────────────────────────────────────────────────
+      //  ```mermaid → แผนภาพ
+      //
+      //  เป็น extension ที่วาดทับด้วย decoration ไม่ได้แก้ schema
+      //  เอกสารจึงยังเป็น codeBlock มาตรฐาน — เซิร์ฟเวอร์เขียนได้ ค้นหาเจอ
+      //  และถ้าส่วนนี้พัง ผู้ใช้เห็นบล็อกโค้ดตามปกติ ไม่ใช่เนื้อหาหาย
+      //  (เหตุผลเต็มอยู่ใน mermaidPreview.ts)
+      //
+      //  ⚠️ withCollaboration spread options ที่ส่งเข้าไปทั้งก้อน จึงใส่
+      //     extensions ตรงนี้ได้โดยไม่ทับ CollaborationExtension ที่มันเติมให้
+      // ─────────────────────────────────────────────────────────────────
+      extensions: [MermaidPreview({ theme })],
     }),
-    [fragment],
+    // theme อยู่ใน deps เพราะ mermaid เก็บธีมเป็น global state ของโมดูล
+    // สลับโหมดมืดแล้วต้องสร้าง extension ใหม่เพื่อให้แผนภาพวาดใหม่ตามธีม
+    [fragment, theme],
   )
 
   // ─── ส่ง projection เมื่อเนื้อหาเปลี่ยน ──────────────────────────────────

@@ -135,3 +135,11 @@ public record PageContentDto(
 /// (BlockNote ไม่มีโครงรองรับ newline ภายในย่อหน้าเดียว)
 /// </param>
 public record AppendParagraphsRequest(IReadOnlyList<string>? Paragraphs);
+
+/// <param name="Markdown">
+/// เนื้อหาเป็น markdown — หัวข้อ รายการ คำพูดอ้างอิง บล็อกโค้ด เส้นคั่น
+/// ` ```mermaid ` แสดงเป็นแผนภาพจริงในเบราว์เซอร์
+///
+/// ตาราง/รูป/HTML จะถูกลดรูปเป็นบล็อกโค้ดแล้วรายงานกลับทาง warnings
+/// </param>
+public record AppendMarkdownRequest(string? Markdown);

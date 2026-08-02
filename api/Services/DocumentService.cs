@@ -48,6 +48,21 @@ public class DocumentService(
     /// </summary>
     private const int MaxParagraphsPerCall = 50;
 
+    /// <summary>
+    /// เพดานบล็อกต่อการเรียกหนึ่งครั้ง — เหตุผลเดียวกับย่อหน้า
+    /// สูงกว่าเพราะ markdown หนึ่งชิ้นให้บล็อกมากกว่าย่อหน้าเปล่า ๆ ตามธรรมชาติ
+    /// </summary>
+    private const int MaxBlocksPerCall = 200;
+
+    /// <summary>บล็อกเดียวที่ยาวเกินนี้แทบแน่นอนว่าเป็นความผิดพลาดของผู้เรียก</summary>
+    private const int MaxSingleBlockLength = 20_000;
+
+    /// <summary>
+    /// เพดานของ body ที่เก็บลง index ค้นหา และของ markdown ที่รับต่อครั้ง
+    /// เอกสารยาวมาก ๆ ทำให้ bigram index โตเร็วโดยที่ผลค้นหาไม่ได้ดีขึ้น
+    /// </summary>
+    private const int MaxProjectionLength = 100_000;
+
     public async Task<Result<DocumentBootstrap>> GetBootstrapAsync(
         Guid pageId, CancellationToken ct = default)
     {
@@ -342,6 +357,93 @@ public class DocumentService(
             .Where(p => p.Length > 0)
             .ToList();
 
+        var blocks = expanded
+            .Select(text => new BlockDraft(
+                MarkdownToBlockNote.Paragraph, NoAttributes, text, [], []))
+            .ToList();
+
+        var written = await WriteBlocksAsync(pageId, blocks, ct);
+        if (written.IsFailure) return written.Error;
+
+        return new AppendParagraphsResult(written.Value, expanded.Count);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  เขียน markdown ต่อท้ายเอกสาร
+    //
+    //  ⚠️ ห้ามส่งผ่านทาง AppendParagraphsAsync — มันแตกทุกอย่างที่ '\n'
+    //     ซึ่งจะฉีกบล็อกโค้ด (และผังงาน mermaid) เป็นชิ้น ๆ
+    // ═══════════════════════════════════════════════════════════════════════
+    public async Task<Result<AppendMarkdownResult>> AppendMarkdownAsync(
+        Guid pageId, string markdown, CancellationToken ct = default)
+    {
+        var source = (markdown ?? string.Empty).ReplaceLineEndings("\n");
+
+        if (source.Trim().Length == 0)
+            return Error.Validation("ไม่มีเนื้อหาให้เขียน", "no_markdown");
+
+        // ─────────────────────────────────────────────────────────────────
+        //  เพดานเป็นเรื่องทรัพยากร ไม่ใช่เรื่องรูปแบบ
+        //
+        //  ของที่ schema รับไม่ได้ (ตาราง รูป HTML) ถูก "ลดรูปแล้วรายงาน" ไม่ใช่
+        //  ปฏิเสธ — ดู MarkdownToBlockNote เหตุผลอยู่ที่นั่น
+        //  ส่วนสามข้อนี้คือกรณีที่ผู้เรียกต้องเปลี่ยนสิ่งที่ส่งมาจริง ๆ
+        // ─────────────────────────────────────────────────────────────────
+        if (source.Length > MaxProjectionLength)
+        {
+            return Error.Validation(
+                $"เนื้อหายาวเกิน {MaxProjectionLength:N0} ตัวอักษร — แบ่งเขียนหลายครั้ง",
+                "markdown_too_long");
+        }
+
+        MarkdownConversion converted;
+        try
+        {
+            converted = MarkdownToBlockNote.Convert(source);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "แปลง markdown ไม่สำเร็จสำหรับหน้า {PageId}", pageId);
+            return Error.Validation("อ่าน markdown ไม่ออก", "markdown_parse_failed");
+        }
+
+        if (converted.Blocks.Count == 0)
+            return Error.Validation("ไม่มีเนื้อหาให้เขียน", "no_markdown");
+
+        if (converted.Blocks.Count > MaxBlocksPerCall)
+        {
+            return Error.Validation(
+                $"เขียนได้ครั้งละไม่เกิน {MaxBlocksPerCall} บล็อก", "too_many_blocks");
+        }
+
+        var oversized = converted.Blocks.FirstOrDefault(
+            b => (b.Text?.Length ?? 0) > MaxSingleBlockLength);
+
+        if (oversized is not null)
+        {
+            return Error.Validation(
+                $"บล็อกเดียวยาวเกิน {MaxSingleBlockLength:N0} ตัวอักษร", "block_too_long");
+        }
+
+        var written = await WriteBlocksAsync(pageId, converted.Blocks, ct);
+        if (written.IsFailure) return written.Error;
+
+        return new AppendMarkdownResult(
+            written.Value, converted.Blocks.Count, converted.Warnings);
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> NoAttributes
+        = new Dictionary<string, string>();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ทางเขียนจริง — ใช้ร่วมกันทั้งย่อหน้าและ markdown
+    //
+    //  รวมไว้ที่เดียวโดยเจตนา: ส่วนที่พังแล้วเจ็บ (สิทธิ์ · อ่านสถานะก่อนเขียน ·
+    //  ทำ diff · projection) ต้องมีฉบับเดียว ไม่ใช่สองฉบับที่ค่อย ๆ เพี้ยนจากกัน
+    // ═══════════════════════════════════════════════════════════════════════
+    private async Task<Result<long>> WriteBlocksAsync(
+        Guid pageId, IReadOnlyList<BlockDraft> blocks, CancellationToken ct)
+    {
         var role = await permissions.GetEffectiveRoleAsync(pageId, ct);
         if (role is null) return PageNotFound;
         if (!role.Value.CanEdit()) return NoEditPermission;
@@ -364,7 +466,7 @@ public class DocumentService(
         AppendUpdate written;
         try
         {
-            written = BlockNoteWriter.BuildAppendUpdate(existing, expanded);
+            written = BlockNoteWriter.BuildAppendUpdate(existing, blocks);
         }
         catch (Exception ex)
         {
@@ -389,20 +491,38 @@ public class DocumentService(
         //
         //  เบราว์เซอร์จะเขียนทับด้วยฉบับที่แกะจาก Y.Doc จริงในภายหลัง ซึ่งถูกต้อง
         //  กว่าเสมอ ที่นี่แค่ทำให้ช่วงเวลาระหว่างนั้นไม่ตาบอด
+        //
+        //  ⚠️ เก็บ "ข้อความล้วน" เท่านั้น ห้ามใส่ marker ของ markdown (# , - )
+        //     ฉบับของเบราว์เซอร์มาจาก blocksToPlainText() ซึ่งไม่มี marker
+        //     ถ้าที่นี่ใส่ body_text จะสลับรูปแบบไปมาทุกครั้งที่มีคนเปิดหน้า
+        //     แล้วผลค้นหาจะไม่คงที่
+        //
+        //     ซอร์สของบล็อกโค้ดถูกเก็บด้วย ไม่ตัดทิ้ง — ไม่งั้น AI จะอ่านผังงาน
+        //     ที่ตัวเองเขียนกลับมาไม่ได้ แล้วแก้ไขมันไม่ได้เลย
         // ─────────────────────────────────────────────────────────────────
         var projection = await documents.GetSearchProjectionAsync(pageId, ct);
         var body = projection?.BodyText ?? string.Empty;
-        var addition = string.Join("\n", expanded);
+        var addition = string.Join("\n", Flatten(blocks));
 
         await documents.UpsertSearchProjectionAsync(
             pageId, page.AccessRootId, page.Title,
             Truncate(body.Length > 0 ? $"{body}\n{addition}" : addition), ct);
 
         logger.LogInformation(
-            "เขียน {Count} ย่อหน้าลงหน้า {PageId} (seq {Seq})",
-            expanded.Count, pageId, appended.Value.Seq);
+            "เขียน {Count} บล็อกลงหน้า {PageId} (seq {Seq})",
+            blocks.Count, pageId, appended.Value.Seq);
 
-        return new AppendParagraphsResult(appended.Value.Seq, expanded.Count);
+        return appended.Value.Seq;
+    }
+
+    /// <summary>ข้อความของทุกบล็อกตามลำดับที่คนอ่าน รวมลูกหลาน</summary>
+    private static IEnumerable<string> Flatten(IReadOnlyList<BlockDraft> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block.Text is { Length: > 0 } text) yield return text;
+            foreach (var child in Flatten(block.Children)) yield return child;
+        }
     }
 
     public async Task<Result<IReadOnlyList<BacklinkDto>>> GetBacklinksAsync(
@@ -496,11 +616,7 @@ public class DocumentService(
         return (double)smaller / larger >= 0.75;
     }
 
-    /// <summary>
-    /// จำกัดขนาด body ที่เก็บลง index ค้นหา
-    /// เอกสารยาวมาก ๆ ทำให้ bigram index โตเร็วโดยที่ผลค้นหาไม่ได้ดีขึ้น
-    /// </summary>
-    private static string Truncate(string text, int max = 100_000)
+    private static string Truncate(string text, int max = MaxProjectionLength)
         => text.Length <= max ? text : text[..max];
 
     private static Error PageNotFound => Error.NotFound("ไม่พบหน้านี้", "page_not_found");

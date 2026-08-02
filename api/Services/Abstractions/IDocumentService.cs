@@ -43,11 +43,33 @@ public interface IDocumentService
     /// </remarks>
     Task<Result<AppendParagraphsResult>> AppendParagraphsAsync(
         Guid pageId, IReadOnlyList<string> paragraphs, CancellationToken ct = default);
+
+    /// <summary>ต่อท้ายเนื้อหาที่เขียนเป็น markdown</summary>
+    /// <remarks>
+    /// รองรับ: หัวข้อ · รายการ (รวม checklist) · คำพูดอ้างอิง · บล็อกโค้ด · เส้นคั่น
+    /// ยังไม่รองรับ: ตัวหนา/เอียง/ลิงก์ (mark) · ตาราง · รูป · การซ้อนชั้น
+    ///
+    /// ⚠️ ของที่รองรับไม่ได้จะถูก "ลดรูปแล้วรายงานกลับ" ทาง Warnings ไม่ใช่ปฏิเสธ
+    ///    ผู้เรียกคือ LLM ที่มองผลลัพธ์ไม่เห็น — การเงียบแปลว่ามันเชื่อว่าเขียนสำเร็จ
+    ///    ส่วน 400 มักได้ retry ด้วยเนื้อหาเดิม
+    ///
+    /// ⚠️ ต่อท้ายเสมอ ไม่มีทางแก้หรือลบของเดิม — เจตนา ไม่ใช่ข้อจำกัดชั่วคราว
+    /// </remarks>
+    Task<Result<AppendMarkdownResult>> AppendMarkdownAsync(
+        Guid pageId, string markdown, CancellationToken ct = default);
 }
 
 /// <param name="Seq">ลำดับของ update ที่เขียนลง log</param>
 /// <param name="ParagraphCount">จำนวนย่อหน้าที่เพิ่มเข้าไป</param>
 public record AppendParagraphsResult(long Seq, int ParagraphCount);
+
+/// <param name="Seq">ลำดับของ update ที่เขียนลง log</param>
+/// <param name="BlockCount">จำนวนบล็อกที่เพิ่มเข้าไป</param>
+/// <param name="Warnings">
+/// สิ่งที่ถูกลดรูป — ต้องส่งถึงผู้เรียกเสมอ ไม่ใช่แค่ log ไว้
+/// ว่างได้ = แปลงได้ครบตามที่เขียนมา
+/// </param>
+public record AppendMarkdownResult(long Seq, int BlockCount, IReadOnlyList<string> Warnings);
 
 /// <param name="Frames">ไบนารี [u32 count][u32 len][bytes]… frame 0 = snapshot</param>
 public record DocumentBootstrap(

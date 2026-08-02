@@ -32,6 +32,13 @@ export default defineConfig({
           //    มีแต่ subpath อย่าง y-protocols/awareness การใส่ชื่อเปล่า ๆ
           //    ทำให้ build ล้มด้วย "Missing '.' specifier"
           yjs: ['yjs', 'y-prosemirror', 'y-indexeddb'],
+          // ⚠️ mermaid ถูกโหลดด้วย dynamic import เท่านั้น (mermaidPreview.ts)
+          //    ก้อนนี้จึงไม่ถูกดึงมาตอนเปิดแอป มาเฉพาะตอนเจอ ```mermaid จริง ๆ
+          //
+          //    ระบุแค่ entry — mermaid แยก chunk ของ diagram แต่ละชนิดเองอยู่แล้ว
+          //    การพยายามยัดทั้งหมดมารวมกันจะทำให้หน้าที่มีแค่ flowchart
+          //    ต้องโหลด cytoscape กับ katex ไปด้วยโดยไม่ได้ใช้
+          mermaid: ['mermaid'],
         },
       },
     },
