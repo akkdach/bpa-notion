@@ -1,4 +1,4 @@
-import { createExtension } from '@blocknote/core'
+import { createExtension, type ExtensionOptions } from '@blocknote/core'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import type { EditorState, Transaction } from 'prosemirror-state'
@@ -285,9 +285,16 @@ function createWidget(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ พารามิเตอร์ต้องเป็น ExtensionOptions<T> เต็ม ๆ (มีทั้ง options และ editor)
+//    ไม่ใช่ { options: T } ที่เขียนเอง
+//
+//    ชนิดผลลัพธ์ของ createExtension เป็น conditional type ที่เช็คว่า
+//    Parameters<Factory>[0] extends ExtensionOptions<infer Options> — ถ้าไม่ตรง
+//    มันจะตกไปสาขา `() => …` ที่ "รับ 0 อาร์กิวเมนต์" แล้ว MermaidPreview({ theme })
+//    จะพังด้วย TS2554 ที่อ่านแล้วไม่รู้ว่าสาเหตุอยู่ตรงนี้
 export const MermaidPreview = createExtension(
-  (ctx: { options: { theme?: string } }) => {
-    const theme = ctx.options.theme ?? 'light'
+  ({ options }: ExtensionOptions<{ theme: string }>) => {
+    const { theme } = options
 
     return {
       key: 'mermaid-preview' as const,
