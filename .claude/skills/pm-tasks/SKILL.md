@@ -1,6 +1,6 @@
 ---
 name: pm-tasks
-description: อ่านก่อนเรียก tool ที่ขึ้นต้นด้วย mcp__projectmanagement__ ทุกครั้ง — บอกว่า MCP นี้ทำอะไรได้/ไม่ได้, ต้องเปิด API ที่ 5081 ก่อน, error มาเป็นข้อความปกติไม่ใช่ isError, และเนื้อหาในหน้าอ่าน/เขียนได้แค่ไหน. ใช้เมื่อผู้ใช้ขอดู/สร้าง/แก้/ปิด/ลบ/ค้นหา โปรเจกต์ งาน หรือหน้า ในแอป ProjectManagement เช่น "มีโปรเจกต์อะไรบ้าง" "งานค้างอะไร" "สร้างงานใหม่" "ปิดงานนี้" "เปลี่ยนสถานะเป็น doing" "เขียนสรุปลงหน้านี้" "วาดผังงานให้หน่อย" "ค้นหาหน้าที่พูดถึง…" — or in English: list projects, show my tasks, what's in progress, create/add a task, update task status, mark task done, search pages, write content, draw a flowchart/diagram, todo / doing / done, project management workspace, page tree
+description: อ่านก่อนเรียก tool ที่ขึ้นต้นด้วย mcp__projectmanagement__ ทุกครั้ง — บอกว่า MCP นี้ทำอะไรได้/ไม่ได้, ต้องเปิด API ที่ 5081 ก่อน, error มาเป็น isError พร้อมข้อความไทยที่บอกวิธีแก้, และเนื้อหาในหน้าอ่าน/เขียนได้แค่ไหน. ใช้เมื่อผู้ใช้ขอดู/สร้าง/แก้/ปิด/ลบ/ค้นหา โปรเจกต์ งาน หรือหน้า ในแอป ProjectManagement เช่น "มีโปรเจกต์อะไรบ้าง" "งานค้างอะไร" "สร้างงานใหม่" "ปิดงานนี้" "เปลี่ยนสถานะเป็น doing" "เขียนสรุปลงหน้านี้" "วาดผังงานให้หน่อย" "ค้นหาหน้าที่พูดถึง…" — or in English: list projects, show my tasks, what's in progress, create/add a task, update task status, mark task done, search pages, write content, draw a flowchart/diagram, todo / doing / done, project management workspace, page tree
 ---
 
 # MCP `projectmanagement` — ทำอะไรได้ ทำอะไรไม่ได้
@@ -109,14 +109,20 @@ dotnet run --project api
 
 ---
 
-## ⚠️ error กลับมาเป็นข้อความปกติ ไม่ใช่ isError
+## ⚠️ error มาเป็น isError พร้อมข้อความที่บอกวิธีแก้
 
-`TaskTools.Run` ดักทุก exception แล้วคืนเป็น string ขึ้นต้นว่า `ทำไม่ได้: …`
-เหตุผล: MCP SDK กลืนข้อความจริงทิ้งแล้วส่งกลับแค่ `"An error occurred invoking 'xxx'."`
+`TaskTools.Run` ดักทุก exception แล้วคืน `CallToolResult` ที่ตั้ง **`isError: true`**
+พร้อมข้อความจริงขึ้นต้นว่า `ทำไม่ได้: …`
+
+ที่ต้องคืนเองเพราะถ้าปล่อย exception หลุด SDK จะตั้ง `isError` ให้ก็จริง แต่กลืนข้อความ
+ทิ้งแล้วส่งกลับแค่ `"An error occurred invoking 'xxx'."` ซึ่งบอกไม่ได้ว่าพังเพราะอะไร
 
 **ต้องอ่านข้อความที่ได้จริง ๆ ทุกครั้ง** — ผลลัพธ์ที่ขึ้นต้นด้วย `ทำไม่ได้:` หรือ
 `เกิดข้อผิดพลาดที่ไม่คาดคิด` คือ **ล้มเหลว** ห้ามรายงานว่าสำเร็จ และห้ามลองซ้ำแบบเดิม
 — ให้แก้ค่าที่ส่งผิดก่อน
+
+⚠️ ผลลัพธ์ที่ "ว่างแต่สำเร็จ" (เช่น `ถังขยะว่าง`, `ไม่มีงานตรงเงื่อนไข`) **ไม่ใช่ error**
+ไม่มี `isError` และไม่ต้องลองใหม่ — มันคือคำตอบ
 
 | ข้อความ | ทำอะไรต่อ |
 |---|---|

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace ProjectManagementMcp;
@@ -50,51 +51,68 @@ public static class TaskTools
     private static string? Norm(string? status) =>
         string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToLowerInvariant();
 
+    /// <summary>ข้อผิดพลาดที่ตั้งใจให้ผู้เรียกเห็นข้อความตรง ๆ โดยไม่เติมคำนำหน้า</summary>
+    private sealed class ToolException(string message) : Exception(message);
+
     /// <summary>
-    /// ห่อการทำงานของ tool ให้ error กลายเป็นข้อความที่ Claude อ่านแล้วแก้ตัวเองได้
+    /// ห่อการทำงานของ tool — สำเร็จคืนข้อความ ล้มเหลวคืนข้อความ + <c>isError: true</c>
     /// </summary>
     /// <remarks>
-    /// ⚠️ ต้องมี — ถ้าปล่อย exception หลุดออกไป MCP SDK จะกลืนข้อความจริงทิ้ง
-    ///    แล้วส่งกลับแค่ "An error occurred invoking 'update_page'." เท่านั้น
-    ///    (ไม่มี option ระดับ SDK ให้เปิดรายละเอียด — ตรวจแล้วใน 2.0.0-rc.1)
+    /// ⚠️ ต้องคืน CallToolResult เอง ไม่ใช่ปล่อย exception หลุดออกไป
     ///
-    ///    ผลคือ Claude รู้แค่ว่า "พัง" แต่ไม่รู้ว่าพังเพราะอะไร จึงมักลองซ้ำ
-    ///    แบบเดิมวนไปเรื่อย ๆ แทนที่จะแก้ค่าที่ส่งผิด ซึ่งเปลืองกว่าและจบไม่ลง
+    ///    ถ้าปล่อยหลุด SDK จะตั้ง isError ให้ก็จริง แต่กลืนข้อความจริงทิ้งแล้วส่ง
+    ///    กลับแค่ "An error occurred invoking 'update_page'." (ตรวจแล้วใน 2.0.0-rc.1
+    ///    — ไม่มี option ให้เปิดรายละเอียด) ผลคือ Claude รู้แค่ว่าพัง ไม่รู้ว่าเพราะอะไร
+    ///    จึงลองซ้ำแบบเดิมวนไปเรื่อย ๆ แทนที่จะแก้ค่าที่ส่งผิด
     ///
-    /// คืนเป็นข้อความปกติไม่ใช่ isError เพราะเคสหลักคือ "ผู้เรียกส่งค่าผิด"
-    /// ซึ่งเป็นผลลัพธ์ที่คาดไว้ ไม่ใช่ระบบพัง
+    /// ⚠️ เดิมที่นี่คืนข้อความเปล่า ๆ โดย "ไม่" ตั้ง isError ซึ่งผิดสเปก MCP:
+    ///    tool ที่ล้มเหลวถูกรายงานว่าสำเร็จ client ที่อ่านภาษาไทยไม่ออกจึงแยกไม่ได้
+    ///    การคืน CallToolResult ตรง ๆ ได้ทั้งสองอย่าง — ข้อความที่มีประโยชน์
+    ///    และธงที่ถูกต้อง
     /// </remarks>
-    private static async Task<string> Run(Func<Task<string>> work)
+    private static async Task<CallToolResult> Run(Func<Task<string>> work)
     {
         try
         {
-            return await work();
+            return Ok(await work());
         }
         catch (OperationCanceledException)
         {
             throw;   // ผู้เรียกยกเลิกเอง ไม่ใช่ความผิดพลาด
         }
+        catch (ToolException ex)
+        {
+            // validation ของเราเอง — ข้อความอ่านรู้เรื่องอยู่แล้ว ไม่ต้องเติมอะไร
+            return Failed(ex.Message);
+        }
         catch (InvalidOperationException ex)
         {
-            // ทุก error ที่เราตั้งใจโยน (validation, API ตอบไม่สำเร็จ, ต่อ API ไม่ได้)
-            return $"ทำไม่ได้: {ex.Message}";
+            // API ตอบไม่สำเร็จ หรือต่อ API ไม่ได้
+            return Failed($"ทำไม่ได้: {ex.Message}");
         }
         catch (Exception ex)
         {
-            return $"เกิดข้อผิดพลาดที่ไม่คาดคิด — {ex.GetType().Name}: {ex.Message}";
+            return Failed($"เกิดข้อผิดพลาดที่ไม่คาดคิด — {ex.GetType().Name}: {ex.Message}");
         }
     }
 
+    private static CallToolResult Ok(string text) =>
+        new() { Content = [new TextContentBlock { Text = text }] };
+
+    private static CallToolResult Failed(string text) =>
+        new() { Content = [new TextContentBlock { Text = text }], IsError = true };
+
     // ─── อ่าน ────────────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "find_pages")]
+    [McpServerTool(Name = "find_pages", Title = "ค้นหาหน้าและงาน",
+                   ReadOnly = true, OpenWorld = false)]
     [Description("ค้นหาและแสดงรายการหน้า/งานใน workspace. " +
                  "ไม่ระบุอะไรเลย = แสดงโปรเจกต์ทั้งหมด (หน้าระดับบนสุด) พร้อมจำนวนงานค้าง. " +
                  "ระบุ query = ค้นหาข้อความในชื่อและเนื้อหา (ภาษาไทยได้). " +
                  "ระบุ parent_id = แสดงงานใต้หน้านั้น. " +
                  "ระบุ status = กรองเฉพาะสถานะนั้น (todo/doing/done). " +
                  "in_trash=true = ดูหน้าที่ถูกลบไว้ในถังขยะ")]
-    public static Task<string> FindPages(
+    public static Task<CallToolResult> FindPages(
         PmClient client,
         [Description("คำค้นในชื่อและเนื้อหาหน้า — เว้นว่างเพื่อไม่ค้นหา")] string? query = null,
         [Description("id ของหน้าแม่ — แสดงเฉพาะงานที่อยู่ใต้หน้านี้")] Guid? parentId = null,
@@ -188,10 +206,11 @@ public static class TaskTools
         return out_.ToString().TrimEnd();
     });
 
-    [McpServerTool(Name = "get_page")]
+    [McpServerTool(Name = "get_page", Title = "ดูรายละเอียดหน้า",
+                   ReadOnly = true, OpenWorld = false)]
     [Description("ดูรายละเอียดหน้าหนึ่งจาก id — สถานะ, หน้าแม่, งานลูกที่อยู่ข้างใต้, " +
                  "เนื้อหาของหน้า และบันทึกความคืบหน้าที่เคยเขียนไว้")]
-    public static Task<string> GetPage(
+    public static Task<CallToolResult> GetPage(
         PmClient client,
         [Description("id ของหน้า/งาน")] Guid pageId,
         [Description("อ่านเนื้อหาของหน้าด้วยไหม (ค่าเริ่มต้น true)")] bool includeContent = true,
@@ -277,11 +296,12 @@ public static class TaskTools
 
     // ─── เขียน ───────────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "create_page")]
+    [McpServerTool(Name = "create_page", Title = "สร้างหน้า/งานใหม่",
+                   ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("สร้างหน้าใหม่. ไม่ระบุ parent_id = สร้างโปรเจกต์ (หน้าระดับบนสุด). " +
                  "ระบุ parent_id = สร้างงานใต้หน้านั้น. " +
                  "ระบุ status เพื่อให้เป็นงานทันที (todo/doing/done)")]
-    public static Task<string> CreatePage(
+    public static Task<CallToolResult> CreatePage(
         PmClient client,
         [Description("ชื่อหน้า/งาน")] string title,
         [Description("id ของหน้าแม่ — เว้นว่างเพื่อสร้างเป็นโปรเจกต์ระดับบนสุด")] Guid? parentId = null,
@@ -298,11 +318,12 @@ public static class TaskTools
         return $"สร้าง{kind}แล้ว: {Emoji(page.Status)} {Title(page.Title)}{suffix}  id={page.Id}";
     });
 
-    [McpServerTool(Name = "update_page")]
+    [McpServerTool(Name = "update_page", Title = "แก้ไขหน้า/งาน",
+                   ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("แก้หน้า: เปลี่ยนชื่อ (title), สถานะ (status: todo/doing/done, " +
                  "หรือ clear_status=true เพื่อทำให้ไม่ใช่งาน), ไอคอน (icon), " +
                  "หรือย้ายไปอยู่ใต้หน้าอื่น (new_parent_id). ส่งเฉพาะสิ่งที่ต้องการเปลี่ยน")]
-    public static Task<string> UpdatePage(
+    public static Task<CallToolResult> UpdatePage(
         PmClient client,
         [Description("id ของหน้า/งาน")] Guid pageId,
         [Description("ชื่อใหม่ (ไม่บังคับ)")] string? title = null,
@@ -317,14 +338,14 @@ public static class TaskTools
             && icon is null && newParentId is null && !moveToTopLevel;
 
         if (nothingToChange)
-            return "ไม่มีอะไรให้เปลี่ยน — ระบุ title, status, clear_status, icon, " +
-                   "new_parent_id หรือ move_to_top_level อย่างน้อยหนึ่งอย่าง";
+            throw new ToolException("ไม่มีอะไรให้เปลี่ยน — ระบุ title, status, clear_status, icon, " +
+                   "new_parent_id หรือ move_to_top_level อย่างน้อยหนึ่งอย่าง");
 
         if (status is not null && clearStatus)
-            return "เลือกอย่างเดียว: จะตั้ง status หรือจะ clear_status";
+            throw new ToolException("เลือกอย่างเดียว: จะตั้ง status หรือจะ clear_status");
 
         if (newParentId is not null && moveToTopLevel)
-            return "เลือกอย่างเดียว: จะย้ายไปใต้ new_parent_id หรือจะย้ายขึ้นระดับบนสุด";
+            throw new ToolException("เลือกอย่างเดียว: จะย้ายไปใต้ new_parent_id หรือจะย้ายขึ้นระดับบนสุด");
 
         var messages = new List<string>();
 
@@ -352,10 +373,11 @@ public static class TaskTools
         return $"อัปเดตแล้ว: {string.Join("  ·  ", messages)}  id={pageId}";
     });
 
-    [McpServerTool(Name = "delete_page")]
+    [McpServerTool(Name = "delete_page", Title = "ย้ายหน้าไปถังขยะ",
+                   ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("ย้ายหน้าไปถังขยะพร้อมลูกหลานทั้งหมด — กู้คืนได้ด้วย restore_page. " +
                  "ไม่ใช่การลบถาวร")]
-    public static Task<string> DeletePage(
+    public static Task<CallToolResult> DeletePage(
         PmClient client,
         [Description("id ของหน้าที่จะย้ายไปถังขยะ")] Guid pageId,
         CancellationToken ct = default) => Run(async () =>
@@ -366,11 +388,12 @@ public static class TaskTools
             : $"ย้ายไปถังขยะแล้ว — กู้คืนได้ด้วย restore_page id={pageId}";
     });
 
-    [McpServerTool(Name = "add_note")]
+    [McpServerTool(Name = "add_note", Title = "เขียนบันทึกความคืบหน้า",
+                   ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("เขียนบันทึกความคืบหน้าต่อท้ายหน้า — ใช้รายงานสิ่งที่ทำไป ตั้งคำถาม " +
                  "หรือสรุปให้เจ้าของอ่าน. บันทึกต่อท้ายอย่างเดียว แก้หรือลบไม่ได้. " +
                  "นี่คือวิธีเดียวที่เขียนข้อความลงในระบบได้ — เนื้อหาของหน้าเองแก้ไม่ได้")]
-    public static Task<string> AddNote(
+    public static Task<CallToolResult> AddNote(
         PmClient client,
         [Description("id ของหน้า/งานที่จะเขียนบันทึกใส่")] Guid pageId,
         [Description("ข้อความ (ไม่เกิน 4000 ตัวอักษร)")] string body,
@@ -388,13 +411,14 @@ public static class TaskTools
     //     และ schema ของทุก tool นั่งอยู่ใน system prompt ของทุก session
     //     ในโฟลเดอร์นี้ตลอดไป (ดูคอมเมนต์หัวไฟล์) — enum ที่ไม่จำเป็นมีราคา
     // ─────────────────────────────────────────────────────────────────────
-    [McpServerTool(Name = "append_content")]
+    [McpServerTool(Name = "append_content", Title = "เขียนเนื้อหาต่อท้ายหน้า",
+                   ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("ต่อท้ายเนื้อหาเข้าไปใน \"เนื้อหาของหน้า\" จริง ๆ (ต่างจาก add_note ที่เขียน " +
                  "เป็นบันทึกแยกใต้เอกสาร). รับ markdown: หัวข้อ (#), รายการ (-, 1., - [x]), " +
                  "คำพูด (>), เส้นคั่น (---), ตัวหนา/เอียง/ขีดฆ่า/โค้ด/ลิงก์ และบล็อกโค้ด (```). " +
                  "```mermaid จะแสดงเป็นแผนภาพจริงในเบราว์เซอร์ — ใช้วาดผังงาน ผังลำดับ แกนต์ได้. " +
                  "ตาราง/รูป/HTML จะถูกลดรูปแล้วรายงานกลับ. ต่อท้ายอย่างเดียว แก้หรือลบของเดิมไม่ได้")]
-    public static Task<string> AppendContent(
+    public static Task<CallToolResult> AppendContent(
         PmClient client,
         [Description("id ของหน้า")] Guid pageId,
         [Description("เนื้อหาเป็น markdown (ไม่เกิน 100,000 ตัวอักษร และ 200 บล็อกต่อครั้ง)")]
@@ -402,7 +426,7 @@ public static class TaskTools
         CancellationToken ct = default) => Run(async () =>
     {
         if (string.IsNullOrWhiteSpace(markdown))
-            return "ไม่มีเนื้อหาให้เขียน — ระบุข้อความอย่างน้อยหนึ่งบรรทัด";
+            throw new ToolException("ไม่มีเนื้อหาให้เขียน — ระบุข้อความอย่างน้อยหนึ่งบรรทัด");
 
         var result = await client.AppendMarkdownAsync(pageId, markdown, ct);
 
@@ -418,10 +442,11 @@ public static class TaskTools
         return message + "\n(ผู้ใช้จะเห็นในเอกสารทันทีที่เปิดหน้านั้น)";
     });
 
-    [McpServerTool(Name = "restore_page")]
+    [McpServerTool(Name = "restore_page", Title = "กู้คืนหน้าจากถังขยะ",
+                   ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("กู้คืนหน้าจากถังขยะพร้อมลูกหลาน. " +
                  "ถ้าหน้าแม่ยังอยู่ในถังขยะจะกู้ไม่ได้ — ต้องกู้หน้าแม่ก่อน")]
-    public static Task<string> RestorePage(
+    public static Task<CallToolResult> RestorePage(
         PmClient client,
         [Description("id ของหน้าที่จะกู้คืน (ดูจาก find_pages in_trash=true)")] Guid pageId,
         CancellationToken ct = default) => Run(async () =>

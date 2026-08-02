@@ -96,6 +96,38 @@ User Secrets เพราะไม่ต้องตั้งใหม่ทุ�
 > Production — `Program.cs` จึงเรียก `AddUserSecrets` เองอย่างชัดเจน ไม่งั้น secret
 > จะหายไปเงียบ ๆ แล้วขึ้นว่า "ยังไม่ได้ตั้ง Pm:Token" ทั้งที่ตั้งไปแล้ว
 
+## ความเข้ากันได้กับสเปก MCP
+
+ตรวจด้วยการ probe โปรโตคอลจริง — `scripts/verify-mcp.mjs` ล็อกทุกข้อไว้แล้ว
+
+| เรื่อง | สถานะ |
+|---|---|
+| transport | stdio · JSON-RPC 2.0 คั่นด้วย newline · **log ไป stderr เท่านั้น** |
+| `protocolVersion` | รองรับถึง **2025-11-25** · ต่อรองย้อนหลังได้ถึง `2024-11-05` · เวอร์ชันที่ไม่รู้จัก → ตอบด้วยรุ่นล่าสุดที่รองรับ |
+| `serverInfo` | `name: "projectmanagement"` คงที่ ไม่ผูกกับชื่อ assembly · มี `title` และ `version` จาก `<Version>` ใน csproj |
+| capabilities | `tools.listChanged`, `logging` |
+| tool metadata | ทุกตัวมี `title` และ **`annotations`** (`readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`) |
+| `isError` | ตั้ง `true` ทุกครั้งที่ tool ล้มเหลว **พร้อมข้อความที่บอกวิธีแก้** |
+| JSON-RPC errors | method ไม่รู้จัก → `-32601` · tool ไม่รู้จัก → `-32602` · `ping` ตอบได้ |
+
+**`annotations` มีไว้ให้ client ตัดสินใจว่าอะไรอนุมัติอัตโนมัติได้**
+`find_pages` / `get_page` เป็น `readOnlyHint: true` ส่วน `delete_page` เป็น
+`destructiveHint: true` ตัวเดียวในชุด (verify ล็อกไว้ว่าต้องมีตัวเดียว)
+
+> ⚠️ **`isError` ต้องคืนเป็น `CallToolResult` เอง ห้ามปล่อย exception หลุด**
+> ถ้าปล่อยหลุด SDK จะตั้ง `isError` ให้ก็จริง แต่กลืนข้อความจริงทิ้งแล้วส่งกลับแค่
+> `"An error occurred invoking 'update_page'."` (ตรวจแล้วใน 2.0.0-rc.1 — ไม่มี option
+> ให้เปิดรายละเอียด) โมเดลจึงรู้แค่ว่าพัง ไม่รู้ว่าเพราะอะไร แล้วลองซ้ำแบบเดิมไม่จบ
+
+**ไม่ได้ทำ และเหตุผล**
+
+- **`outputSchema` / `structuredContent`** (2025-06-18) — tool คืน prose ภาษาไทยที่ออกแบบ
+  ให้โมเดลอ่านแล้วตัดสินใจต่อได้ทันที การบังคับเป็น JSON จะทำให้ต้องแปลงสองรอบโดยไม่ได้อะไร
+- **`resources` / `prompts`** — ยังไม่มีอะไรที่เหมาะกับสองอย่างนี้
+- **Streamable HTTP transport** — MCP นี้รันเป็น process ลูกของ Claude Code บนเครื่องเดียวกัน
+  stdio จึงถูกต้องแล้ว · การให้เครื่องอื่นต่อเข้ามาต้องทำ transport เพิ่มพร้อม OAuth 2.1
+  ตามสเปก ซึ่งเป็นคนละงาน
+
 ## tools ที่มี
 
 โมเดล: **โปรเจกต์ = หน้าระดับบนสุด, งาน = หน้าลูกใต้โปรเจกต์** สถานะเก็บใน

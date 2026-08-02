@@ -6,6 +6,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>ProjectManagementMcp</RootNamespace>
+
+    <!-- ─────────────────────────────────────────────────────────────────
+         เวอร์ชันที่ประกาศใน serverInfo ของ MCP handshake — ที่เดียว
+         IncludeSourceRevisionInInformationalVersion=false ไม่งั้นจะได้
+         "1.0.0+<git sha>" ซึ่งไม่ใช่เวอร์ชันที่ client ควรเห็น
+         ───────────────────────────────────────────────────────────────── -->
+    <Version>1.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- เหมือน api/ — warning ที่ปล่อยผ่านคือบั๊กที่รอเกิด -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 

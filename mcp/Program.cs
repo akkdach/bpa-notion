@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Protocol;
 using ProjectManagementMcp;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -42,7 +43,28 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 builder.Services.AddSingleton<PmClient>();
 
 builder.Services
-    .AddMcpServer()
+    .AddMcpServer(options =>
+    {
+        // ─────────────────────────────────────────────────────────────────
+        //  ⚠️ ตั้งชื่อ/เวอร์ชันเอง ไม่ปล่อยให้ SDK เดาจากชื่อ assembly
+        //
+        //     ค่าเริ่มต้นคือชื่อ assembly ซึ่งเปลี่ยนตามวิธี build — verify-mcp
+        //     build ด้วย -p:AssemblyName=ProjectManagementMcpVerify เพื่อเลี่ยง
+        //     ไฟล์ที่ถูกล็อก แล้ว serverInfo.name ก็เปลี่ยนตามไปด้วย
+        //     ชื่อ server ไม่ควรขึ้นกับรายละเอียดของการ build
+        //
+        //     ชื่อตรงกับคีย์ใน .mcp.json เพื่อให้ไล่ต้นทางได้ตอนมีหลาย server
+        // ─────────────────────────────────────────────────────────────────
+        options.ServerInfo = new Implementation
+        {
+            Name = "projectmanagement",
+            Title = "ProjectManagement",
+            // มาจาก <Version> ใน csproj ที่เดียว ไม่ใช่สตริงที่ต้องแก้สองที่
+            Version = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? "0.0.0",
+        };
+    })
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 

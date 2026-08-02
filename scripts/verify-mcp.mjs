@@ -187,6 +187,22 @@ try {
     init.result?.capabilities?.tools !== undefined,
     JSON.stringify(init.result?.capabilities))
 
+  // ─────────────────────────────────────────────────────────────────────
+  //  ความเข้ากันได้กับสเปก MCP
+  //
+  //  ⚠️ serverInfo.name ต้องคงที่ ไม่ใช่ชื่อ assembly — สคริปต์นี้เอง build ด้วย
+  //     -p:AssemblyName=ProjectManagementMcpVerify เพื่อเลี่ยงไฟล์ที่ถูกล็อก
+  //     ถ้าปล่อยให้ SDK เดาจาก assembly ชื่อ server จะเปลี่ยนตามวิธี build
+  // ─────────────────────────────────────────────────────────────────────
+  check('เจรจา protocolVersion ตามที่ client ขอ',
+    init.result?.protocolVersion === '2025-06-18', init.result?.protocolVersion)
+  check('serverInfo.name คงที่ ไม่ผูกกับชื่อ assembly',
+    init.result?.serverInfo?.name === 'projectmanagement',
+    JSON.stringify(init.result?.serverInfo))
+  check('serverInfo มีเวอร์ชันที่ตั้งไว้จริง ไม่ใช่ค่า default ของ assembly',
+    /^\d+\.\d+\.\d+$/.test(init.result?.serverInfo?.version ?? ''),
+    JSON.stringify(init.result?.serverInfo))
+
   mcp.notify('notifications/initialized')
 
   console.log(`\n${C.yellow}── tools/list ──${C.off}`)
@@ -213,6 +229,39 @@ try {
   check('ไม่มี tool เกินจากที่ประกาศไว้ (คุมขนาด system prompt)',
     names.length === expected.length,
     `ที่เจอ: ${names.join(', ')}`)
+
+  // ═════════════════════════════════════════════════════════════════════
+  //  annotations — สเปก MCP 2025-03-26
+  //
+  //  client ใช้ค่านี้ตัดสินว่า tool ไหนปลอดภัยพอจะอนุมัติอัตโนมัติ
+  //  ถ้าไม่มี delete_page กับ find_pages จะดูเหมือนกันหมดในสายตา client
+  // ═════════════════════════════════════════════════════════════════════
+  const byName = Object.fromEntries(tools.map((t) => [t.name, t]))
+
+  check('ทุก tool มี title สำหรับแสดงผล',
+    tools.every((t) => typeof t.title === 'string' && t.title.length > 0),
+    JSON.stringify(tools.map((t) => [t.name, t.title])))
+
+  check('ทุก tool มี annotations',
+    tools.every((t) => t.annotations !== undefined),
+    JSON.stringify(tools.filter((t) => t.annotations === undefined).map((t) => t.name)))
+
+  for (const name of ['find_pages', 'get_page']) {
+    check(`${name} ประกาศว่าเป็น read-only`,
+      byName[name]?.annotations?.readOnlyHint === true,
+      JSON.stringify(byName[name]?.annotations))
+  }
+
+  // ⚠️ ตัวเดียวที่ต้องเป็น destructive — ถ้าวันหนึ่งมีตัวอื่นด้วย ต้องตั้งใจเพิ่มที่นี่
+  //    ไม่ใช่ปล่อยให้หลุดเข้าไปเงียบ ๆ
+  const destructive = tools.filter((t) => t.annotations?.destructiveHint === true)
+  check('delete_page เป็น tool เดียวที่ประกาศว่า destructive',
+    destructive.length === 1 && destructive[0]?.name === 'delete_page',
+    JSON.stringify(destructive.map((t) => t.name)))
+
+  check('tool ที่เขียนข้อมูลต้องไม่ประกาศว่าเป็น read-only',
+    ['create_page', 'update_page', 'delete_page', 'add_note', 'append_content', 'restore_page']
+      .every((n) => byName[n]?.annotations?.readOnlyHint !== true))
 
   // ⚠️ ลบถาวรต้องไม่อยู่ในมือ AI — เป็นการตัดสินใจเรื่องความปลอดภัย ไม่ใช่ ergonomics
   check('ไม่มี tool ลบถาวร (purge) ให้ AI',
@@ -383,25 +432,53 @@ try {
 
   // ─── error ต้องกลับไปเป็นข้อความที่ Claude อ่านรู้เรื่อง ไม่ใช่ crash ──────
   console.log(`\n${C.yellow}── การจัดการ error ──${C.off}`)
+  // ═══════════════════════════════════════════════════════════════════════
+  //  ⚠️ ต้องได้ทั้งสองอย่าง: ข้อความที่โมเดลอ่านแล้วแก้ตัวเองได้ **และ**
+  //     isError: true ตามสเปก MCP
+  //
+  //     เดิมคืนแต่ข้อความโดยไม่ตั้ง isError ซึ่งแปลว่า tool ที่ล้มเหลวถูกรายงาน
+  //     ว่าสำเร็จ — client ที่อ่านภาษาไทยไม่ออกแยกไม่ได้เลยว่าอะไรพัง
+  // ═══════════════════════════════════════════════════════════════════════
 
   const badStatus = await callTool('update_page', { pageId: taskId, status: 'ยังไม่เริ่ม' })
   check('สถานะที่ไม่มีในระบบ → ข้อความบอกค่าที่ถูกต้อง ไม่ใช่ crash',
     badStatus.text.includes('todo') && badStatus.text.includes('done'),
     badStatus.text || JSON.stringify(badStatus.error))
+  check('  และตั้ง isError ตามสเปก', badStatus.isError, JSON.stringify(badStatus))
 
   const conflicting = await callTool('update_page', {
     pageId: taskId, status: 'todo', clearStatus: true,
   })
   check('สั่งขัดกันเอง (status + clear_status) → บอกให้เลือกอย่างเดียว',
     conflicting.text.includes('เลือกอย่างเดียว'), conflicting.text)
+  check('  และตั้ง isError ตามสเปก', conflicting.isError, JSON.stringify(conflicting))
 
   const nothing = await callTool('update_page', { pageId: taskId })
   check('ไม่ระบุอะไรให้เปลี่ยน → บอกว่าต้องระบุอะไรบ้าง',
     nothing.text.includes('ไม่มีอะไรให้เปลี่ยน'), nothing.text)
+  check('  และตั้ง isError ตามสเปก', nothing.isError, JSON.stringify(nothing))
 
   const missing = await callTool('get_page', { pageId: '00000000-0000-0000-0000-000000000000' })
   check('หน้าที่ไม่มีอยู่ → error ที่อ่านรู้เรื่อง',
     (missing.text + JSON.stringify(missing.error)).length > 0, '(ไม่ได้อะไรกลับมาเลย)')
+  check('  และตั้ง isError ตามสเปก', missing.isError, JSON.stringify(missing))
+
+  // ⚠️ ด้านกลับ: ผลลัพธ์ "ว่างเปล่าแต่ถูกต้อง" ต้องไม่ถูกตีเป็น error
+  //    ถังขยะว่างคือคำตอบที่ใช้ได้ ไม่ใช่ความล้มเหลว
+  const emptyTrash = await callTool('find_pages', { inTrash: true })
+  check('ผลลัพธ์ว่างแต่สำเร็จ ต้องไม่ตั้ง isError',
+    !emptyTrash.isError, JSON.stringify(emptyTrash))
+
+  const unknownTool = await mcp.send('tools/call', { name: 'no_such_tool', arguments: {} })
+  check('เรียก tool ที่ไม่มี → JSON-RPC error -32602 ไม่ใช่ผลลัพธ์ปกติ',
+    unknownTool.error?.code === -32602, JSON.stringify(unknownTool))
+
+  const unknownMethod = await mcp.send('resources/list', {})
+  check('method ที่ไม่รองรับ → -32601 Method not found',
+    unknownMethod.error?.code === -32601, JSON.stringify(unknownMethod))
+
+  const pong = await mcp.send('ping', {})
+  check('ping ตอบได้ตามสเปก', pong.result !== undefined, JSON.stringify(pong))
 
   console.log(`\n${C.yellow}── ความสะอาดของช่องโปรโตคอล ──${C.off}`)
 
