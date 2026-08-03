@@ -36,14 +36,27 @@ if ([string]::IsNullOrWhiteSpace($Output)) {
 Write-Host ''
 Write-Host "publish ไปที่: $Output" -ForegroundColor Cyan
 
-# ─────────────────────────────────────────────────────────────────────────
-#  ลบของเก่าก่อน
+# ═══════════════════════════════════════════════════════════════════════════
+#  ลบของเก่าก่อน — ทั้งปลายทาง "และ" obj/bin
 #
-#  ⚠️ publish ทับโฟลเดอร์เดิมไม่ได้ลบไฟล์ที่หายไปจาก build ใหม่ — ไฟล์ค้างจาก
-#     รุ่นก่อนจะอยู่ต่อ แล้วทำให้ debug ยาก (เช่น .dll ของ dependency ที่ถอดออกแล้ว)
-# ─────────────────────────────────────────────────────────────────────────
-if (Test-Path $Output) {
-    Remove-Item $Output -Recurse -Force
+#  ⚠️ publish ทับโฟลเดอร์เดิมไม่ลบไฟล์ที่หายไปจาก build ใหม่ — ของเก่าค้างอยู่
+#     ปนกับของใหม่ เคยเจอโฟลเดอร์ที่มีไฟล์ของ self-contained ครบ
+#     (coreclr.dll, System.Private.CoreLib.dll) แต่ runtimeconfig.json เป็นของ
+#     framework-dependent ที่เหลือจาก publish รอบก่อน
+#
+#     ผลคือแอปไปหา shared framework บนเครื่องแล้วตายด้วย
+#     "You must install or update .NET to run this application"
+#     ทั้งที่ไฟล์ runtime อยู่ในโฟลเดอร์เดียวกันครบทุกตัว — อ่าน error แล้วเดา
+#     ไม่ออกเลยว่าปัญหาอยู่ที่การปนกันของสองรอบ publish
+#
+#     ลบ obj/bin ด้วยเป็นการกันไว้ก่อน (ยังไม่ยืนยันว่า obj/ เป็นต้นเหตุโดยตรง —
+#     ลองสร้างสถานการณ์ซ้ำแล้วไม่เกิด) แต่ราคาแค่ build ใหม่ทั้งหมด ซึ่งคุ้ม
+#     กับการที่ deploy ผิดแล้วไปรู้ตัวบนเซิร์ฟเวอร์
+# ═══════════════════════════════════════════════════════════════════════════
+foreach ($stale in @($Output,
+                     (Join-Path $root 'api\obj\Release'),
+                     (Join-Path $root 'api\bin\Release'))) {
+    if (Test-Path $stale) { Remove-Item $stale -Recurse -Force }
 }
 
 dotnet publish $project `
@@ -75,9 +88,31 @@ function Check([string]$label, [bool]$ok, [string]$detail = '') {
 Check 'มี ProjectManagementAPI.exe (ไม่ต้องพึ่ง dotnet บนเครื่อง)' `
     (Test-Path (Join-Path $Output 'ProjectManagementAPI.exe'))
 
-Check 'มี .NET runtime แพ็กมาด้วย (coreclr.dll)' `
-    (Test-Path (Join-Path $Output 'coreclr.dll')) `
-    'ถ้าไม่มี แปลว่า publish ออกมาแบบ framework-dependent จะได้ 500.31 บนเครื่องที่ไม่มี .NET 10'
+# ═══════════════════════════════════════════════════════════════════════════
+#  ⚠️ ต้องเช็คที่ runtimeconfig.json ไม่ใช่ที่ "มี coreclr.dll ไหม"
+#
+#     coreclr.dll มีอยู่ได้ทั้งที่แอปยังเป็น framework-dependent (เกิดขึ้นจริงเมื่อ
+#     obj/ ค้างจาก publish รอบก่อน) แล้ว host จะไปหา shared framework บนเครื่อง
+#     ทั้งที่ไฟล์ runtime อยู่ครบในโฟลเดอร์ — การเช็ค coreclr.dll จึง "ผ่านทั้งที่
+#     ของใช้ไม่ได้" ซึ่งแย่กว่าไม่เช็คเลย
+#
+#     ตัวชี้ขาดคือ runtimeOptions.includedFrameworks
+#       มี  → self-contained จริง ไม่แตะ shared framework
+#       ไม่มี (เป็น "frameworks" แทน) → ต้องพึ่ง .NET บนเครื่อง
+# ═══════════════════════════════════════════════════════════════════════════
+$runtimeConfig = Join-Path $Output 'ProjectManagementAPI.runtimeconfig.json'
+$selfContained = $false
+
+if (Test-Path $runtimeConfig) {
+    $options = (Get-Content $runtimeConfig -Raw | ConvertFrom-Json).runtimeOptions
+    $selfContained = $null -ne $options.PSObject.Properties['includedFrameworks']
+}
+
+Check 'เป็น self-contained จริง (runtimeconfig มี includedFrameworks)' $selfContained `
+    'ถ้าไม่ใช่ จะตายด้วย "You must install or update .NET" บนเครื่องที่ไม่มี .NET 10 — ลบ api\obj\Release แล้ว publish ใหม่'
+
+Check 'มี .NET runtime แพ็กมาด้วย (System.Private.CoreLib.dll)' `
+    (Test-Path (Join-Path $Output 'System.Private.CoreLib.dll'))
 
 # ⚠️ native ของ Yjs — ขาดแล้ว append_content (รวมผังงาน mermaid) พังตอน runtime
 #    ส่วนอย่างอื่นทำงานปกติหมด จึงหาสาเหตุยากมาก
