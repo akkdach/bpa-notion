@@ -1,0 +1,52 @@
+{
+  // ─────────────────────────────────────────────────────────────────────────
+  //  ESM (NodeNext) ไม่ใช่ CommonJS แม้ NestJS จะ default เป็น CJS
+  //
+  //  เหตุผลเดียวแต่ชี้ขาด: @blocknote/core และ y-prosemirror เป็น ESM-only
+  //  ซึ่งเป็นแพ็กเกจที่ขั้นตอน "documents" ในแผนต้องใช้ ถ้าเลือก CJS ตอนนี้
+  //  โค้ดทุกจุดที่แตะ BlockNote จะต้องใช้ dynamic import() แล้วกลายเป็น async
+  //  ลามไปทั้งชั้น service
+  //
+  //  ⚠️ ราคาที่จ่าย: relative import ต้องลงท้าย ".js" ทุกอัน (NodeNext บังคับ)
+  //     import { x } from './foo.js'   ← ถูก แม้ไฟล์จริงจะเป็น foo.ts
+  // ─────────────────────────────────────────────────────────────────────────
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // ⚠️ ES2022 ไม่ใช่ ES2023: esbuild ที่ drizzle-kit 0.30 ฝังมาไม่รู้จัก target
+    //    es2023 แล้วจะพังตั้งแต่อ่าน drizzle.config.ts ("Invalid target")
+    //    lib เป็น ES2023 ได้ตามปกติ — Node 22 มี API ครบอยู่แล้ว
+    "target": "ES2022",
+    "lib": ["ES2023"],
+
+    // NestJS DI อ่าน type ของ constructor parameter จาก metadata ที่ tsc ฝังให้
+    // ทั้งสองบรรทัดนี้ขาดไม่ได้ ไม่งั้น DI จะ resolve ไม่ได้ตอน runtime
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "declaration": false,
+    "removeComments": false,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+
+    // ─── ความเข้มงวด ────────────────────────────────────────────────────
+    // strict ทั้งก้อน + สามข้อที่ strict ไม่ครอบ แต่เป็นบั๊กจริงทั้งคู่
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // ⚠️ ปิดไว้: strictPropertyInitialization ตีกับ property ที่ Nest ฉีดค่าให้
+    //    ผ่าน decorator ซึ่ง tsc มองไม่เห็น
+    "strictPropertyInitialization": false,
+
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*", "test/**/*", "scripts/**/*", "drizzle.config.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

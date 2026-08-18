@@ -24,13 +24,71 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
+      # ⚠️ สองชุด ไม่ใช่ชุดเดียว — กฎของ .NET กับของ Node ตรวจคนละอย่างและ
+      #    บังคับคนละที่ ดู server/scripts/check-architecture.mjs หัวไฟล์
       - run: node scripts/check-architecture.mjs
+      - run: node server/scripts/check-architecture.mjs
 
   # ═════════════════════════════════════════════════════════════════════════
-  #  API
+  #  Server (NestJS) — typecheck + gates + lint + เทสที่ต่อฐานจริง
+  # ═════════════════════════════════════════════════════════════════════════
+  server:
+    name: Server (NestJS)
+    runs-on: ubuntu-latest
+    env:
+      PGPASSWORD_CI: ci_server_password
+      POSTGRES_HOST_PORT: '5440'
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      # ─────────────────────────────────────────────────────────────────
+      #  ต้องเป็น postgres ตัวจริงจาก compose ไม่ใช่ service container ธรรมดา
+      #
+      #  ⚠️ เทสพึ่ง PGroonga (ค้นหาไทย) และ ICU th-TH collation ซึ่ง image
+      #     postgres มาตรฐานไม่มี — ถ้าใช้ตัวอื่นเทสจะ "ผ่าน" ทั้งที่ index
+      #     ที่จริงจะใช้ใน production ไม่เคยถูกสร้างเลย
+      # ─────────────────────────────────────────────────────────────────
+      - name: เปิด postgres
+        run: |
+          cp .env.example .env
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${PGPASSWORD_CI}|" .env
+          docker compose up -d postgres --wait --wait-timeout 120
+
+      - name: ติดตั้ง dependency
+        working-directory: server
+        run: npm ci
+
+      - name: เตรียมฐาน (role pm_app + migration + sql/objects.sql)
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://pm_app:ci_app_password@localhost:5440/projectmanagement
+          DATABASE_ADMIN_URL: postgres://postgres:ci_server_password@localhost:5440/projectmanagement
+        run: npm run db:setup
+
+      - name: typecheck + gates + lint + test
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://pm_app:ci_app_password@localhost:5440/projectmanagement
+          DATABASE_ADMIN_URL: postgres://postgres:ci_server_password@localhost:5440/projectmanagement
+          JWT_SECRET: ci_jwt_key_ที่ยาวเกินสามสิบสองไบต์แน่นอนสำหรับการทดสอบเท่านั้น
+          JWT_ISSUER: ProjectManagementAPI
+        run: npm run check
+
+  # ═════════════════════════════════════════════════════════════════════════
+  #  API (.NET) — ทางถอย ไม่ใช่ของที่ deploy แล้ว
+  #
+  #  ⚠️ ยังอยู่เพราะแผนบอกว่า rollback = สลับ nginx กลับไปที่ container เดิม
+  #     ทางถอยที่ compile ไม่ผ่านไม่ใช่ทางถอย — job นี้จึงยังต้องเขียว
+  #     ลบทั้ง job นี้พร้อมกับตอนที่ลบ api/ (ดู PLAN-node.md ข้อ 8)
   # ═════════════════════════════════════════════════════════════════════════
   api:
-    name: API (net10.0)
+    name: API (.NET — ทางถอย)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -192,21 +250,29 @@ jobs:
   verify:
     name: Verify (ยิง API / MCP / เบราว์เซอร์จริง)
     runs-on: ubuntu-latest
-    needs: [api, web]
+    needs: [server, web]
 
     env:
       PGPASSWORD_CI: ci_verify_password
       POSTGRES_HOST_PORT: '5440'
+      # ⚠️ ทั้ง server และ scripts/run-sql.cs ต้องชี้ฐานเดียวกันจริง ๆ ไม่งั้น
+      #    verify-repair จะทำฐานหนึ่งเพี้ยนแล้วไปตรวจอีกฐาน ได้ผลว่า "ซ่อมสำเร็จ"
+      #    ทั้งที่ไม่เคยมีอะไรเพี้ยน
       ConnectionStrings__DefaultConnection: >-
         Host=localhost;Port=5440;Database=projectmanagement;Username=postgres;Password=ci_verify_password;Include Error Detail=true
-      Jwt__Key: ci_jwt_key_ที่ยาวเกินสามสิบสองไบต์แน่นอนสำหรับการทดสอบเท่านั้น
-      ASPNETCORE_ENVIRONMENT: Development
-      ASPNETCORE_URLS: http://localhost:5081
+      DATABASE_URL: postgres://pm_app:ci_app_password@localhost:5440/projectmanagement
+      DATABASE_ADMIN_URL: postgres://postgres:ci_verify_password@localhost:5440/projectmanagement
+      JWT_SECRET: ci_jwt_key_ที่ยาวเกินสามสิบสองไบต์แน่นอนสำหรับการทดสอบเท่านั้น
+      JWT_ISSUER: ProjectManagementAPI
+      NODE_ENV: development
+      PORT: '5081'
       API_BASE: http://localhost:5081/api/v1
 
     steps:
       - uses: actions/checkout@v5
 
+      # ⚠️ .NET ยังต้องมีเพราะ verify-mcp เรียก mcp/ ที่ยังเป็น .NET อยู่
+      #    (mcp คุยกับ API ผ่าน REST — ย้ายทีหลังได้ ดู PLAN-node.md ขอบเขต)
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
@@ -230,10 +296,13 @@ jobs:
           sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')|" .env
           docker compose up -d postgres --wait --wait-timeout 120
 
-      - name: ลง schema
-        run: |
-          dotnet tool install --global dotnet-ef --version 10.* || dotnet tool update --global dotnet-ef --version 10.*
-          dotnet ef database update --project api
+      - name: ติดตั้ง dependency ฝั่ง server
+        working-directory: server
+        run: npm ci
+
+      - name: ลง schema (role pm_app + migration + sql/objects.sql)
+        working-directory: server
+        run: npm run db:setup
 
       # ck_pages_status กันค่าขยะจากทางที่ไม่ผ่าน service (raw SQL, psql,
       # ExecuteUpdateAsync) — ตรงนี้ตรวจแค่ว่า "มีอยู่และนิยามถูก"
@@ -258,7 +327,8 @@ jobs:
 
       - name: เปิด API ค้างไว้
         run: |
-          dotnet run --project api --configuration Release --no-launch-profile > api.log 2>&1 &
+          npm --prefix server run build
+          node server/dist/main.js > api.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -fsS "${API_BASE}/health" > /dev/null 2>&1; then
               echo "API พร้อมหลังจาก ${i} วินาที"

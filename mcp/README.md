@@ -29,7 +29,7 @@ pwsh scripts/setup-mcp.ps1
 1. build เป็น Release
 2. ถาม URL ของ API แล้วให้วาง token
 3. ยิง `GET /workspaces/current` หนึ่งครั้งเพื่อยืนยันว่าใช้ได้จริง
-4. เก็บลง [.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets)
+4. เก็บลง [.NET Secret Manager](https://learn.microsoft.com/aspnet/core/security/app-secrets) (mcp/ ยังเป็น .NET)
    ที่ `%APPDATA%\Microsoft\UserSecrets\` — **นอก repo**
 5. ลบค่าแบบเก่า (`Pm:Email` / `Pm:Password` / `Pm:Workspace`) ทิ้งถ้ายังค้างอยู่
 
@@ -38,7 +38,7 @@ workspace นั้น — สคริปต์ไม่ต้องรู้�
 
 จากนั้น
 
-1. เปิด API ทิ้งไว้ — `dotnet run --project api`
+1. เปิด API ทิ้งไว้ — `npm --prefix server run dev`
 2. เปิด Claude Code ใหม่ในโฟลเดอร์ `d:/Projects/notion` แล้วอนุญาต MCP server ชื่อ `projectmanagement`
 3. ตรวจด้วย `/mcp` — ต้องเห็นสถานะ connected
 
@@ -57,7 +57,7 @@ token แก้ทั้งสามข้อ: หนึ่งเครื่อ
 
 การ authenticate เลือก scheme จาก prefix ของ `Authorization: Bearer` —
 ขึ้นต้นด้วย `pmt_` ไปทาง API token ที่เหลือไปทาง JWT เดิม
-(`AuthConfiguration.RouteScheme`) เว็บจึงไม่ต้องเปลี่ยนอะไรเลย
+(`server/src/auth/request-context.interceptor.ts`) เว็บจึงไม่ต้องเปลี่ยนอะไรเลย
 
 ### ทำไม AI ต้องมีบัญชีของตัวเอง
 
@@ -264,7 +264,7 @@ schema ของทุก tool อยู่ใน system prompt ของ **ท�
 ## ตรวจว่าใช้ได้จริง
 
 ```bash
-dotnet run --project api          # ต้องเปิดค้างไว้ก่อน
+npm --prefix server run dev          # ต้องเปิดค้างไว้ก่อน
 node scripts/verify-mcp.mjs       # 46 เคส
 ```
 

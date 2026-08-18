@@ -1,20 +1,21 @@
-﻿# ═══════════════════════════════════════════════════════════════════════════
-#  publish API สำหรับ IIS — แบบ self-contained
+# ═══════════════════════════════════════════════════════════════════════════
+#  publish API (NestJS) สำหรับ IIS
 #
 #      pwsh scripts/publish-iis.ps1
 #      pwsh scripts/publish-iis.ps1 -Output D:\deploy\pm-api
 #
-#  ⚠️ self-contained = แพ็ก .NET runtime ไปกับแอป **ไม่ต้องลง runtime บนเซิร์ฟเวอร์**
+#  ⚠️ ต้องมี iisnode หรือ ARR reverse proxy บนเซิร์ฟเวอร์
 #
-#     ทำแบบนี้เพราะเซิร์ฟเวอร์ปลายทางมีระบบอื่นรันอยู่บน .NET รุ่นเก่ากว่า
-#     framework-dependent จะได้ 500.31 (Failed to load ASP.NET Core runtime)
-#     และการไปลง Hosting Bundle รุ่นใหม่ต้อง iisreset ซึ่งกระทบระบบอื่นด้วย
+#     ต่างจากรุ่น .NET ตรงที่ IIS ไม่ได้ "โฮสต์" process ให้เอง — Node ต้องรัน
+#     เป็น process ของตัวเองแล้ว IIS ส่งต่อคำขอไปให้ วิธีที่แนะนำคือ
+#     ARR (Application Request Routing) proxy ไปที่ http://localhost:PORT
+#     ซึ่งไม่ต้องลง iisnode และอัปเดต Node ได้โดยไม่แตะ IIS เลย
 #
-#     สิ่งเดียวที่ยังต้องมีบนเซิร์ฟเวอร์คือ AspNetCoreModuleV2 (มากับ Hosting
-#     Bundle เวอร์ชันไหนก็ได้) — ถ้ามี ASP.NET Core site อื่นรันอยู่แล้วก็มีแล้ว
+#     ส่วน process ให้รันด้วย NSSM / Windows Service / pm2 — ดู README
 #
-#  แลกกับ: ขนาด ~120 MB และ security patch ของ .NET ต้อง publish ใหม่เอง
-#  ไม่ได้อัปเดตตามเครื่อง
+#  ⚠️ ไม่มีขั้น "แพ็ก runtime ไปด้วย" แบบ self-contained ของ .NET
+#     Node ต้องลงบนเครื่องปลายทาง (>= 22) แลกกับที่ artifact เล็กลงมาก
+#     (~40 MB เทียบกับ ~120 MB) และ security patch ของ Node อัปเดตแยกได้
 #
 #  ⚠️ ไฟล์นี้ต้องเซฟเป็น UTF-8 พร้อม BOM — Windows PowerShell 5.1 อ่าน .ps1
 #     ที่ไม่มี BOM เป็น ANSI ทำให้คอมเมนต์ไทยเพี้ยนจน parser พังทั้งไฟล์
@@ -26,126 +27,105 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $root 'api\ProjectManagementAPI.csproj'
-if (-not (Test-Path $project)) { Write-Error "ไม่พบ $project" }
+$server = Join-Path $root 'server'
+if (-not (Test-Path (Join-Path $server 'package.json'))) { Write-Error "ไม่พบ $server\package.json" }
 
 if ([string]::IsNullOrWhiteSpace($Output)) {
-    $Output = Join-Path $root 'api\publish'
+    $Output = Join-Path $root 'server\publish'
 }
 
 Write-Host ''
 Write-Host "publish ไปที่: $Output" -ForegroundColor Cyan
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  ลบของเก่าก่อน — ทั้งปลายทาง "และ" obj/bin
+#  ลบของเก่าก่อน
 #
-#  ⚠️ publish ทับโฟลเดอร์เดิมไม่ลบไฟล์ที่หายไปจาก build ใหม่ — ของเก่าค้างอยู่
-#     ปนกับของใหม่ เคยเจอโฟลเดอร์ที่มีไฟล์ของ self-contained ครบ
-#     (coreclr.dll, System.Private.CoreLib.dll) แต่ runtimeconfig.json เป็นของ
-#     framework-dependent ที่เหลือจาก publish รอบก่อน
-#
-#     ผลคือแอปไปหา shared framework บนเครื่องแล้วตายด้วย
-#     "You must install or update .NET to run this application"
-#     ทั้งที่ไฟล์ runtime อยู่ในโฟลเดอร์เดียวกันครบทุกตัว — อ่าน error แล้วเดา
-#     ไม่ออกเลยว่าปัญหาอยู่ที่การปนกันของสองรอบ publish
-#
-#     ลบ obj/bin ด้วยเป็นการกันไว้ก่อน (ยังไม่ยืนยันว่า obj/ เป็นต้นเหตุโดยตรง —
-#     ลองสร้างสถานการณ์ซ้ำแล้วไม่เกิด) แต่ราคาแค่ build ใหม่ทั้งหมด ซึ่งคุ้ม
-#     กับการที่ deploy ผิดแล้วไปรู้ตัวบนเซิร์ฟเวอร์
+#  ⚠️ คัดลอกทับโฟลเดอร์เดิมไม่ลบไฟล์ที่หายไปจาก build ใหม่ — โมดูลที่ถูกถอด
+#     ออกจาก package.json จะยังค้างอยู่ใน node_modules ปลายทาง แล้วโค้ดที่
+#     import มันจะยังทำงานได้บนเซิร์ฟเวอร์ทั้งที่พังบนเครื่อง dev
 # ═══════════════════════════════════════════════════════════════════════════
-foreach ($stale in @($Output,
-                     (Join-Path $root 'api\obj\Release'),
-                     (Join-Path $root 'api\bin\Release'))) {
-    if (Test-Path $stale) { Remove-Item $stale -Recurse -Force }
+if (Test-Path $Output) {
+    Write-Host 'ลบ publish เดิม' -ForegroundColor DarkGray
+    Remove-Item -Recurse -Force $Output
+}
+foreach ($stale in @('dist')) {
+    $path = Join-Path $server $stale
+    if (Test-Path $path) { Remove-Item -Recurse -Force $path }
 }
 
-dotnet publish $project `
-    --configuration Release `
-    --runtime win-x64 `
-    --self-contained true `
-    --output $Output
+Push-Location $server
+try {
+    Write-Host 'ติดตั้ง dependency (รวม dev เพื่อ build)' -ForegroundColor DarkGray
+    npm ci
+    if ($LASTEXITCODE -ne 0) { Write-Error 'npm ci ล้มเหลว' }
 
-if ($LASTEXITCODE -ne 0) { Write-Error 'publish ไม่ผ่าน' }
+    Write-Host 'build' -ForegroundColor DarkGray
+    npm run build
+    if ($LASTEXITCODE -ne 0) { Write-Error 'build ล้มเหลว' }
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  ตรวจของที่ "ขาดแล้วพังเงียบ ๆ"
-#
-#  ทั้งสามอย่างนี้ขาดแล้ว publish ยังสำเร็จ แต่ไปพังตอน runtime บนเซิร์ฟเวอร์
-#  ซึ่งเป็นที่ที่แย่ที่สุดในการรู้
-# ═══════════════════════════════════════════════════════════════════════════
-Write-Host ''
-$failed = $false
-
-function Check([string]$label, [bool]$ok, [string]$detail = '') {
-    if ($ok) { Write-Host "  [ok] $label" -ForegroundColor Green }
-    else {
-        Write-Host "  [!!] $label" -ForegroundColor Red
-        if ($detail) { Write-Host "       $detail" -ForegroundColor DarkGray }
-        $script:failed = $true
-    }
+    # ─────────────────────────────────────────────────────────────────────
+    #  ⚠️ ต้อง prune หลัง build ไม่ใช่ก่อน
+    #
+    #     nest cli กับ typescript อยู่ใน devDependencies — ตัดก่อนแล้ว build
+    #     ไม่ได้ ส่วนการส่ง devDependencies ขึ้นเซิร์ฟเวอร์คือการเพิ่มพื้นที่
+    #     โจมตีโดยไม่ได้อะไรกลับมา
+    # ─────────────────────────────────────────────────────────────────────
+    Write-Host 'ตัด devDependencies' -ForegroundColor DarkGray
+    npm prune --omit=dev
+    if ($LASTEXITCODE -ne 0) { Write-Error 'npm prune ล้มเหลว' }
+}
+finally {
+    Pop-Location
 }
 
-Check 'มี ProjectManagementAPI.exe (ไม่ต้องพึ่ง dotnet บนเครื่อง)' `
-    (Test-Path (Join-Path $Output 'ProjectManagementAPI.exe'))
+New-Item -ItemType Directory -Force -Path $Output | Out-Null
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  ⚠️ ต้องเช็คที่ runtimeconfig.json ไม่ใช่ที่ "มี coreclr.dll ไหม"
+#  สิ่งที่ต้องไปด้วย
 #
-#     coreclr.dll มีอยู่ได้ทั้งที่แอปยังเป็น framework-dependent (เกิดขึ้นจริงเมื่อ
-#     obj/ ค้างจาก publish รอบก่อน) แล้ว host จะไปหา shared framework บนเครื่อง
-#     ทั้งที่ไฟล์ runtime อยู่ครบในโฟลเดอร์ — การเช็ค coreclr.dll จึง "ผ่านทั้งที่
-#     ของใช้ไม่ได้" ซึ่งแย่กว่าไม่เช็คเลย
-#
-#     ตัวชี้ขาดคือ runtimeOptions.includedFrameworks
-#       มี  → self-contained จริง ไม่แตะ shared framework
-#       ไม่มี (เป็น "frameworks" แทน) → ต้องพึ่ง .NET บนเครื่อง
+#  ⚠️ drizzle/ กับ sql/ ต้องไปด้วย ไม่ใช่แค่ dist/ — `npm run db:setup` บน
+#     เซิร์ฟเวอร์อ่านสองโฟลเดอร์นี้ ถ้าลืม schema จะลงไม่ได้และ error ที่ได้
+#     จะบอกแค่ว่า "ไม่พบ migration folder" ซึ่งชี้ไปที่ปัญหาการ deploy ไม่ใช่โค้ด
 # ═══════════════════════════════════════════════════════════════════════════
-$runtimeConfig = Join-Path $Output 'ProjectManagementAPI.runtimeconfig.json'
-$selfContained = $false
+foreach ($item in @('dist', 'node_modules', 'drizzle', 'sql', 'scripts', 'package.json')) {
+    $source = Join-Path $server $item
+    if (-not (Test-Path $source)) { Write-Error "ไม่พบ $source" }
 
-if (Test-Path $runtimeConfig) {
-    $options = (Get-Content $runtimeConfig -Raw | ConvertFrom-Json).runtimeOptions
-    $selfContained = $null -ne $options.PSObject.Properties['includedFrameworks']
+    Write-Host "คัดลอก $item" -ForegroundColor DarkGray
+    Copy-Item -Recurse -Force $source (Join-Path $Output $item)
 }
 
-Check 'เป็น self-contained จริง (runtimeconfig มี includedFrameworks)' $selfContained `
-    'ถ้าไม่ใช่ จะตายด้วย "You must install or update .NET" บนเครื่องที่ไม่มี .NET 10 — ลบ api\obj\Release แล้ว publish ใหม่'
+# ═══════════════════════════════════════════════════════════════════════════
+#  ตรวจว่าได้ของที่ใช้ได้จริง ไม่ใช่แค่ "คำสั่งไม่ error"
+#
+#  ⚠️ argon2 เป็น native addon — ถ้า npm ci รันบนเครื่องที่สถาปัตยกรรมต่างจาก
+#     เซิร์ฟเวอร์ ไฟล์ .node ที่ได้จะโหลดไม่ขึ้น และอาการจะโผล่ตอน "สมัคร
+#     สมาชิกครั้งแรก" ไม่ใช่ตอน deploy
+# ═══════════════════════════════════════════════════════════════════════════
+$entry = Join-Path $Output 'dist\main.js'
+if (-not (Test-Path $entry)) { Write-Error "publish แล้วแต่ไม่มี $entry" }
 
-Check 'มี .NET runtime แพ็กมาด้วย (System.Private.CoreLib.dll)' `
-    (Test-Path (Join-Path $Output 'System.Private.CoreLib.dll'))
+$argon = Get-ChildItem -Path (Join-Path $Output 'node_modules\argon2') -Filter '*.node' -Recurse -ErrorAction SilentlyContinue
+if (-not $argon) {
+    Write-Error @'
+ไม่พบไฟล์ .node ของ argon2 ใน publish
 
-# ⚠️ native ของ Yjs — ขาดแล้ว append_content (รวมผังงาน mermaid) พังตอน runtime
-#    ส่วนอย่างอื่นทำงานปกติหมด จึงหาสาเหตุยากมาก
-Check 'มี yrs.dll (native ของ Yjs — ใช้เขียนเนื้อหาหน้า)' `
-    ((Test-Path (Join-Path $Output 'yrs.dll')) -or
-     (Test-Path (Join-Path $Output 'runtimes\win-x64\native\yrs.dll'))) `
-    'ขาดตัวนี้ append_content จะพัง แต่ API ส่วนอื่นยังทำงาน — เจอตอน AI เขียนเนื้อหาแล้ว error'
+argon2 เป็น native addon ที่ต้อง build ตรงกับ OS/สถาปัตยกรรมของเครื่องปลายทาง
+ถ้า publish จาก Windows แล้วเอาไปวางบน Windows เหมือนกันควรจะมี — ถ้าไม่มี
+แปลว่า npm ci ข้ามขั้น build ไป (มักเป็นเพราะไม่มี build tools)
+'@
+}
 
-# ⚠️ ถ้า IsTransformWebConfigDisabled หลุด SDK จะ generate ทับแล้ว
-#    environmentVariables ที่ตั้งไว้หายหมด
-$webConfig = Join-Path $Output 'web.config'
-$hasEnv = (Test-Path $webConfig) -and
-          ((Get-Content $webConfig -Raw) -match 'Cors__AllowedOrigins__0')
+$size = [math]::Round((Get-ChildItem -Recurse $Output | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
 
-Check 'web.config มี environmentVariables ของเราครบ' $hasEnv `
-    'ถ้าหาย แปลว่า SDK generate ทับ — ตรวจ IsTransformWebConfigDisabled ใน csproj'
-
-if ($failed) { Write-Error 'publish ออกมาไม่ครบ — อย่าเพิ่งเอาขึ้นเซิร์ฟเวอร์' }
-
-$size = [math]::Round((Get-ChildItem $Output -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
 Write-Host ''
-Write-Host "เรียบร้อย — $size MB" -ForegroundColor Green
+Write-Host "✓ publish สำเร็จ — $size MB" -ForegroundColor Green
 Write-Host ''
-Write-Host 'ขั้นต่อไปบนเซิร์ฟเวอร์:' -ForegroundColor Cyan
-Write-Host "  1. ก๊อปโฟลเดอร์นี้ไปที่ physical path ของ site"
-Write-Host '  2. App Pool ต้องเป็น 64-bit  (Enable 32-Bit Applications = False)'
-Write-Host '     ไม่งั้น yrs.dll โหลดไม่ขึ้น แล้วผังงาน mermaid พังโดยที่อย่างอื่นปกติ'
-Write-Host '  3. ตั้งความลับที่ App Pool (ไม่ใช่ใน web.config ที่ขึ้น git):'
-Write-Host '       ConnectionStrings__DefaultConnection'
-Write-Host '       Jwt__Key'
-Write-Host '     วิธีเต็มอยู่ใน docs/deploy-iis.md'
-Write-Host '  4. สร้างโฟลเดอร์ logs\ แล้วให้ app pool identity เขียนได้'
-Write-Host '     (stdoutLogEnabled=true อยู่ — ไม่มีโฟลเดอร์นี้จะไม่มี log ให้ดูตอนพัง)'
+Write-Host 'ขั้นต่อไปบนเซิร์ฟเวอร์:' -ForegroundColor Yellow
+Write-Host '  1. ตั้ง environment variable: DATABASE_URL, JWT_SECRET, JWT_ISSUER, WEB_ORIGIN, PORT'
+Write-Host '  2. ลง schema ครั้งแรก:  npm run db:setup   (ต้องมี DATABASE_ADMIN_URL ชั่วคราว)'
+Write-Host '  3. รันเป็น service:      node dist\main.js  (ผ่าน NSSM / pm2)'
+Write-Host '  4. ตั้ง ARR ใน IIS ให้ proxy /api ไปที่ http://localhost:PORT'
 Write-Host ''
-Write-Host 'ตรวจหลัง deploy:  curl.exe -i https://<host>:<port>/api/v1/health   → ต้องได้ 200'
+Write-Host '⚠️ DATABASE_URL ต้องเป็น pm_app ไม่ใช่ postgres — RLS ไม่มีผลกับ superuser' -ForegroundColor Yellow
 Write-Host ''

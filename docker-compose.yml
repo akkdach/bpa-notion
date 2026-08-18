@@ -3,8 +3,8 @@
 #
 #  ไม่มี key `version:` — obsolete ใน Compose v2 (Docker 29.x) และจะขึ้น warning
 #
-#  ⚠️ ไม่มี Node service ที่นี่โดยเจตนา — realtime วิ่งผ่าน SignalR ใน .NET
-#     (ดู PLAN.md "The realtime CRDT decision")
+#  ⚠️ api เป็น NestJS (server/) แล้ว ไม่ใช่ .NET — ดู PLAN-node.md
+#     realtime ยังไม่ได้ต่อ: web/ ไม่เคยใช้ SignalR จริง (web/src/realtime/ ว่างเปล่า)
 # ═══════════════════════════════════════════════════════════════════════════
 name: projectmanagement
 
@@ -58,43 +58,49 @@ services:
     networks: [app-network]
 
   # ─────────────────────────────────────────────────────────────────────────
-  #  ASP.NET Core API + SignalR hub
+  #  NestJS API
+  #
+  #  ⚠️ ต่อฐานด้วย pm_app ไม่ใช่ postgres — RLS ไม่มีผลกับ superuser เลย ถ้าใส่
+  #     บัญชี owner ตรงนี้ policy ทุกข้อจะถูกข้ามโดยไม่มีอาการอะไรให้เห็น
+  #     (DbService ตรวจข้อนี้ตอนบูตและปฏิเสธที่จะขึ้นถ้า role ผิด)
+  #
+  #  ⚠️ DATABASE_ADMIN_URL ไม่ได้ส่งให้ container นี้โดยเจตนา — runtime ไม่ต้อง
+  #     รู้รหัสของ owner การ migrate เป็นงานของ `npm run db:setup` ที่รันแยก
   # ─────────────────────────────────────────────────────────────────────────
   api:
     build:
-      context: ./api
+      context: ./server
       dockerfile: Dockerfile
     container_name: pm-api
     restart: always
     environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
-      ASPNETCORE_HTTP_PORTS: "8080"
-      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-projectmanagement};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD};Include Error Detail=true
-      Jwt__Key: ${JWT_SECRET:?JWT_SECRET is required}
-      Jwt__Issuer: ${JWT_ISSUER:-ProjectManagementAPI}
-      Jwt__ExpiresIn: ${JWT_EXPIRES_IN:-24h}
-      Jwt__RefreshExpiresIn: ${JWT_REFRESH_EXPIRES_IN:-30d}
-      Cors__AllowedOrigins__0: ${WEB_ORIGIN:-http://localhost}
-      Uploads__RootPath: /app/uploads
-    volumes:
-      - uploads:/app/uploads
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "8080"
+      DATABASE_URL: postgres://pm_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-projectmanagement}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-ProjectManagementAPI}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "5080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health || exit 1"]
+      # ⚠️ /health ตอบ 503 เมื่อ extension หาย ไม่ใช่แค่ตอนต่อฐานไม่ได้ —
+      #    wget ถือว่า 503 เป็นความล้มเหลว ซึ่งเป็นสิ่งที่ต้องการ
+      test: ['CMD-SHELL', 'node -e "fetch(''http://localhost:8080/api/v1/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      start_period: 30s
     networks: [app-network]
 
   # ─────────────────────────────────────────────────────────────────────────
-  #  React SPA served by nginx, which also reverse-proxies /api and /hubs
-  #  → เบราว์เซอร์เห็น origin เดียว → ไม่มี CORS, ไม่ติดปัญหา
-  #    AllowAnyOrigin + AllowCredentials ที่ SignalR ต้องใช้
+  #  React SPA served by nginx, which also reverse-proxies /api
+  #  → เบราว์เซอร์เห็น origin เดียว → ไม่มี CORS และ cookie เป็น SameSite=Strict ได้
   # ─────────────────────────────────────────────────────────────────────────
   web:
     build:
@@ -150,7 +156,6 @@ services:
 
 volumes:
   pgdata:
-  uploads:
   # redisdata:
 
 networks:

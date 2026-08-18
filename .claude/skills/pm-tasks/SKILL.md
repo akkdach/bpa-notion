@@ -17,7 +17,7 @@ isolation + permission check ชุดเดียวกับเว็บ แ�
 **API ต้องเปิดค้างอยู่** — MCP คุยกับมันผ่าน HTTP ที่ `http://localhost:5081`
 
 ```bash
-dotnet run --project api
+npm --prefix server run dev
 ```
 
 ถ้าไม่ได้เปิด ทุก tool จะคืน `ทำไม่ได้: ต่อ API ไม่ได้ที่ …` — อย่าลองซ้ำ ให้บอกผู้ใช้
@@ -127,13 +127,13 @@ dotnet run --project api
 | ข้อความ | ทำอะไรต่อ |
 |---|---|
 | `สถานะต้องเป็น: todo / doing / done` | ส่ง status ผิด — ใช้ 3 ค่านี้เท่านั้น |
-| `ต่อ API ไม่ได้ที่ …` | API ไม่ได้เปิด — บอกผู้ใช้ให้ `dotnet run --project api` |
+| `ต่อ API ไม่ได้ที่ …` | API ไม่ได้เปิด — บอกผู้ใช้ให้ `npm --prefix server run dev` |
 | `ยังไม่ได้ตั้ง Pm:Token` | ยังไม่ setup — บอกผู้ใช้ให้สร้าง token ที่ ตั้งค่า → การเชื่อมต่อ AI แล้วรัน `pwsh scripts/setup-mcp.ps1` |
 | `API 401` ทุกคำสั่ง | token ถูกเพิกถอนหรือหมดอายุ — ห้ามลองซ้ำ บอกผู้ใช้ให้ออกใบใหม่ |
 | `token นี้ใช้ได้กับ workspace ที่ออกให้เท่านั้น` | ใช้ token ผิด workspace — ต้องออกใบใหม่ใน workspace ที่ต้องการ |
 | `ไม่มีเนื้อหาให้เขียน` | ส่ง markdown ว่าง |
 | `เขียนได้ครั้งละไม่เกิน 200 บล็อก` | แบ่งเขียนหลายครั้ง |
-| `column p.status does not exist` | ยังไม่ลง migration — `dotnet ef database update --project api` |
+| `column p.status does not exist` | ยังไม่ลง migration — `npm --prefix server run db:setup` |
 
 ---
 
@@ -153,7 +153,7 @@ find_pages                        → ได้ id ของโปรเจก�
 ## ตรวจว่า MCP ยังใช้ได้
 
 ```bash
-dotnet run --project api      # ต้องเปิดค้าง
+npm --prefix server run dev      # ต้องเปิดค้าง
 node scripts/verify-mcp.mjs   # คุย JSON-RPC กับ server จริง
 ```
 
