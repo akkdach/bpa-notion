@@ -31,6 +31,11 @@ export function configureApp(app: INestApplication): void {
   // body ไบนารีของ Yjs — ต้องลงทะเบียนที่นี่ ไม่ใช่ที่ controller เพราะ express
   // อ่าน body จบก่อนจะถึง route handler เสมอ
   app.use(express.raw({ type: 'application/octet-stream', limit: '4mb' }));
+
+  // รูปที่อัปโหลด (POST /files) ส่งเป็น body ตรง ๆ ไม่ใช่ multipart — แบบแผน
+  // เดียวกับ Yjs ข้างบน limit ของ parser หลวมกว่าเพดานจริง (10MB ตรวจใน
+  // FilesService) เพื่อให้เกินเพดานได้ข้อความ validation ไม่ใช่ 413 ของ library
+  app.use(express.raw({ type: 'image/*', limit: '12mb' }));
 }
 
 /** ตั้งค่าที่มีเฉพาะตอนรันจริง — เทสไม่ต้องการ (และไม่ควรมี) */

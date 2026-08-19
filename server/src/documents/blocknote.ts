@@ -115,7 +115,70 @@ const editorWith = async (content?: Block[]): Promise<HeadlessEditor> => {
  */
 export async function markdownToBlocks(markdown: string): Promise<Block[]> {
   const editor = await editorWith();
-  return editor.tryParseMarkdownToBlocks(markdown);
+  const blocks = await editor.tryParseMarkdownToBlocks(markdown);
+  restoreCodeBlockNewlines(markdown, blocks);
+  return blocks;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ⚠️ newline ในบล็อกโค้ดหายเมื่อ parse บน linkedom
+//
+//  ทาง markdown → HTML → DOM ของ BlockNote พึ่ง preserveWhitespace ของ
+//  ProseMirror ซึ่งทำงานถูกบนเบราว์เซอร์จริง แต่บน DOM shim ทุกบรรทัดใน
+//  <pre><code> ถูกยุบเป็นช่องว่าง — mermaid หลายบรรทัดจึงกลายเป็นบรรทัดเดียว
+//  แล้ววาดไม่ออก ("ไวยากรณ์ mermaid ไม่ถูกต้อง")
+//
+//  แก้ที่ปลายทาง: ดึงเนื้อดิบของ fence จากซอร์ส markdown ตรง ๆ มาแทนข้อความ
+//  ของ codeBlock ตัวที่ i ตามลำดับ — ทำเฉพาะเมื่อจำนวน fence ตรงกับจำนวน
+//  codeBlock เท่านั้น (โค้ดจาก indented block หรือใน blockquote ทำให้ลำดับ
+//  เพี้ยนได้ ซึ่งกรณีนั้นปล่อยผลของ parser ไว้ตามเดิมดีกว่าจับคู่ผิดตัว)
+// ═══════════════════════════════════════════════════════════════════════════
+function restoreCodeBlockNewlines(markdown: string, blocks: Block[]): void {
+  const fences = extractFences(markdown);
+  if (fences.length === 0) return;
+
+  const codeBlocks: Block[] = [];
+  const walk = (list: Block[]): void => {
+    for (const block of list) {
+      if (block.type === 'codeBlock') codeBlocks.push(block);
+      if (block.children) walk(block.children);
+    }
+  };
+  walk(blocks);
+
+  if (codeBlocks.length !== fences.length) return;
+
+  for (const [i, block] of codeBlocks.entries()) {
+    block.content = [{ type: 'text', text: fences[i]!, styles: {} }];
+  }
+}
+
+/** เนื้อดิบของ fenced code block (``` หรือ ~~~) เรียงตามลำดับที่พบ */
+function extractFences(markdown: string): string[] {
+  const fences: string[] = [];
+  let open: string | null = null;
+  let buffer: string[] = [];
+
+  for (const line of markdown.split('\n')) {
+    const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+
+    if (open === null) {
+      if (match) {
+        open = match[1]!;
+        buffer = [];
+      }
+    } else if (match && match[1]![0] === open[0] && match[1]!.length >= open.length) {
+      fences.push(buffer.join('\n'));
+      open = null;
+    } else {
+      buffer.push(line);
+    }
+  }
+
+  // fence ที่ไม่ได้ปิด — parser ก็ยังนับส่วนที่เหลือเป็นโค้ดเหมือนกัน
+  if (open !== null && buffer.length > 0) fences.push(buffer.join('\n'));
+
+  return fences;
 }
 
 /** ย่อหน้าล้วน — ไม่ผ่าน markdown parser เพื่อไม่ให้ `#` หรือ `-` ถูกตีความ */
@@ -269,8 +332,14 @@ function collectText(node: PmNode): string {
     group.forEach((container) => {
       const content = container.firstChild;
       if (content && content.type.name !== 'blockGroup') {
-        const text = content.textContent;
-        if (text.length > 0) lines.push(text);
+        if (content.type.name === 'table') {
+          // ⚠️ textContent ของทั้งตารางคือทุกเซลล์ติดกันไม่มีตัวคั่น ("ชื่อค่าหนึ่ง1")
+          //    ต้องเดินทีละแถวเองตามกฎตาราง (ดู tableRowLines)
+          lines.push(...tableRowLines(content));
+        } else {
+          const text = content.textContent;
+          if (text.length > 0) lines.push(text);
+        }
       }
 
       // blockGroup ของลูกอยู่ "ข้าง ๆ" เนื้อหา ไม่ใช่ข้างใน
@@ -287,14 +356,63 @@ function collectText(node: PmNode): string {
   return lines.join('\n');
 }
 
+/**
+ * กฎข้อความของตาราง — ต้องเหมือนกันทุกตัวสกัด (ที่นี่ 2 ตัว + ฝั่งเว็บ 1 ตัว):
+ * แถวละบรรทัด · ข้อความเซลล์ในแถวคั่นด้วยช่องว่างเดียว · เซลล์/แถวว่างถูกข้าม
+ *
+ * ⚠️ ถ้ารูปแบบสามที่นี้ไม่ตรงกัน body_text ใน index ค้นหาจะสลับไปมาทุกครั้ง
+ *    ที่มีคนเปิดหน้า — ปัญหาเดียวกับกฎ "ไม่มี marker" ของ readPlainText
+ */
+function tableRowLines(table: PmNode): string[] {
+  const rows: string[] = [];
+
+  table.forEach((row) => {
+    const cells: string[] = [];
+    row.forEach((cell) => {
+      const text = cell.textContent;
+      if (text.length > 0) cells.push(text);
+    });
+    if (cells.length > 0) rows.push(cells.join(' '));
+  });
+
+  return rows;
+}
+
+/** แบบเดียวกับ tableRowLines แต่เดินจากโครง JSON ของ BlockNote (tableContent) */
+function tableContentLines(content: unknown): string[] {
+  if (content === null || typeof content !== 'object') return [];
+  const rows = (content as { rows?: unknown }).rows;
+  if (!Array.isArray(rows)) return [];
+
+  const lines: string[] = [];
+  for (const row of rows) {
+    const cells = (row as { cells?: unknown }).cells;
+    if (!Array.isArray(cells)) continue;
+
+    const texts = cells
+      // เซลล์เป็นได้ทั้ง {type:'tableCell', content:[...]} และ inline array เปล่า ๆ
+      .map((cell) =>
+        Array.isArray(cell) ? extractText(cell) : extractText((cell as { content?: unknown })?.content),
+      )
+      .filter((text) => text.length > 0);
+    if (texts.length > 0) lines.push(texts.join(' '));
+  }
+
+  return lines;
+}
+
 /** ข้อความของบล็อกที่จะเขียน — ใช้ต่อท้าย projection ให้ค้นเจอทันที */
 export function blocksToPlainText(blocks: readonly Block[]): string {
   const lines: string[] = [];
 
   const walk = (list: readonly Block[]): void => {
     for (const block of list) {
-      const text = extractText(block.content);
-      if (text.length > 0) lines.push(text);
+      if (block.type === 'table') {
+        lines.push(...tableContentLines(block.content));
+      } else {
+        const text = extractText(block.content);
+        if (text.length > 0) lines.push(text);
+      }
       if (block.children) walk(block.children);
     }
   };

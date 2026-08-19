@@ -77,6 +77,41 @@ describe('markdown → บล็อก', () => {
     expect(blocks[0]!.type).toBe('codeBlock');
     expect(blocksToPlainText(blocks)).toContain('A-->B;');
   });
+
+  it('newline ในบล็อกโค้ดต้องรอด — mermaid หลายบรรทัดวาดไม่ออกถ้าถูกยุบ', async () => {
+    // ⚠️ linkedom ยุบ newline ใน <pre> เป็นช่องว่าง (เบราว์เซอร์จริงไม่เป็น)
+    //    restoreCodeBlockNewlines เอาเนื้อดิบจาก fence มาแทน — เทสนี้ล็อกไว้
+    const blocks = await markdownToBlocks('```mermaid\nflowchart LR\n    A[หนึ่ง] -->|เส้น| B[สอง]\n    B --> C\n```');
+
+    expect(blocks).toHaveLength(1);
+    expect(blocksToPlainText(blocks)).toBe('flowchart LR\n    A[หนึ่ง] -->|เส้น| B[สอง]\n    B --> C');
+  });
+
+  it('หลาย fence ในเอกสารเดียว จับคู่ถูกตัวตามลำดับ', async () => {
+    const blocks = await markdownToBlocks('```js\nconst a = 1;\nconst b = 2;\n```\n\nคั่นกลาง\n\n```mermaid\ngraph TD\nX-->Y\n```');
+
+    const codes = blocks.filter((b) => b.type === 'codeBlock');
+    expect(codes).toHaveLength(2);
+    expect(blocksToPlainText([codes[0]!])).toBe('const a = 1;\nconst b = 2;');
+    expect(blocksToPlainText([codes[1]!])).toBe('graph TD\nX-->Y');
+  });
+
+  it('ตาราง GFM → บล็อก table จริง ไม่ถูกลดรูปเป็นบล็อกโค้ด', async () => {
+    // เอกสารยุค .NET บอกว่า "ตารางถูกลดรูป" — parser ของ BlockNote เองรองรับแล้ว
+    // เทสนี้ล็อกไว้ไม่ให้ถอยกลับตอนอัปเกรด BlockNote
+    const blocks = await markdownToBlocks('| ชื่อ | ค่า |\n| --- | --- |\n| หนึ่ง | 1 |');
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.type).toBe('table');
+  });
+
+  it('รูปจาก URL → บล็อก image จริง ไม่ถูกลดรูปเป็นข้อความ', async () => {
+    const blocks = await markdownToBlocks('![คำบรรยาย](https://example.com/a.png)');
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.type).toBe('image');
+    expect((blocks[0] as { props?: { url?: string } }).props?.url).toBe('https://example.com/a.png');
+  });
 });
 
 describe('เขียนลง Y.Doc', () => {
@@ -156,6 +191,22 @@ describe('เขียนลง Y.Doc', () => {
     expect(text).toContain('หลาน');
   });
 
+  it('ตารางและรูปเขียนลง Y.Doc ได้ รูปร่างผ่าน schema และข้อความในเซลล์ไม่หาย', async () => {
+    // ⚠️ node.check() อย่างเดียวไม่พอ (ดูหัวไฟล์) — ต้อง assert ข้อความด้วย
+    const blocks = await markdownToBlocks(
+      '| ชื่อ | ค่า |\n| --- | --- |\n| หนึ่ง | 1 |\n\n![รูป](https://example.com/a.png)',
+    );
+    const written = await appendBlocks([], blocks);
+
+    expect(written).not.toBeNull();
+
+    const { types, text } = await inspect([written!.update]);
+    expect(types).toEqual(['table', 'image']);
+    for (const cell of ['ชื่อ', 'ค่า', 'หนึ่ง', '1']) {
+      expect(text, `"${cell}" หายไป`).toContain(cell);
+    }
+  });
+
   it('บล็อกว่าง → ไม่เขียนอะไรเลย', async () => {
     expect(await appendBlocks([], [])).toBeNull();
   });
@@ -223,5 +274,18 @@ describe('อ่านข้อความล้วนกลับ', () => {
     const written = await appendBlocks([], await markdownToBlocks('- พ่อ\n  - ลูก'));
 
     expect(await readPlainText([written!.update])).toBe('พ่อ\nลูก');
+  });
+
+  it('ตาราง: แถวละบรรทัด เซลล์คั่นช่องว่าง — ตัวสกัดทั้งสองให้ผลตรงกัน', async () => {
+    // ⚠️ readPlainText (จาก ProseMirror) กับ blocksToPlainText (จาก JSON) เขียน
+    //    คอลัมน์ body_text เดียวกันคนละจังหวะ — และฝั่งเว็บมี tableText อีกตัว
+    //    ที่ต้องตรงตามกฎนี้ (PageEditor.tsx) ถ้าเพี้ยนกันผลค้นหาจะไม่คงที่
+    const md = '| ชื่อ | ค่า |\n| --- | --- |\n| หนึ่ง | 1 |\n| สอง | 2 |';
+    const blocks = await markdownToBlocks(md);
+    const written = await appendBlocks([], blocks);
+
+    const expected = 'ชื่อ ค่า\nหนึ่ง 1\nสอง 2';
+    expect(blocksToPlainText(blocks)).toBe(expected);
+    expect(await readPlainText([written!.update])).toBe(expected);
   });
 });

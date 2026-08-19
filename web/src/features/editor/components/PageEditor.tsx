@@ -15,6 +15,7 @@ import { Cloud, CloudOff, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useResolvedTheme } from '@/features/settings'
 import type { DocStatus } from '../hooks/useYDoc'
+import { uploadImage } from '../service/uploadApi'
 import { MermaidPreview } from './mermaidPreview'
 
 import '@blocknote/core/fonts/inter.css'
@@ -85,6 +86,9 @@ export function PageEditor({ doc, status, editable, onChangeProjection }: PageEd
       //     extensions ตรงนี้ได้โดยไม่ทับ CollaborationExtension ที่มันเติมให้
       // ─────────────────────────────────────────────────────────────────
       extensions: [MermaidPreview({ theme })],
+      // เปิดปุ่ม/ลากวาง/วางรูปจากคลิปบอร์ดของ image block — ถ้าไม่ใส่ BlockNote
+      // จะมีให้แค่ embed จาก URL
+      uploadFile: uploadImage,
     }),
     // theme อยู่ใน deps เพราะ mermaid เก็บธีมเป็น global state ของโมดูล
     // สลับโหมดมืดแล้วต้องสร้าง extension ใหม่เพื่อให้แผนภาพวาดใหม่ตามธีม
@@ -161,6 +165,7 @@ function SaveIndicator({ status }: { status: DocStatus }) {
 //  แล้วส่งขึ้นไปเป็น projection สำหรับ index ค้นหาและ title ใน sidebar
 // ═══════════════════════════════════════════════════════════════════════════
 interface BlockLike {
+  type?: string
   content?: unknown
   children?: BlockLike[]
 }
@@ -168,9 +173,32 @@ interface BlockLike {
 function blocksToPlainText(blocks: readonly BlockLike[]): string {
   return blocks
     .map((block) => {
-      const own = extractText(block.content)
+      const own = block.type === 'table' ? tableText(block.content) : extractText(block.content)
       const nested = block.children ? blocksToPlainText(block.children) : ''
       return [own, nested].filter((part) => part.length > 0).join('\n')
+    })
+    .filter((line) => line.length > 0)
+    .join('\n')
+}
+
+// ⚠️ กฎเดียวกับ tableRowLines/tableContentLines ใน server/src/documents/blocknote.ts:
+//    แถวละบรรทัด · เซลล์ในแถวคั่นช่องว่างเดียว · เซลล์/แถวว่างถูกข้าม
+//    ถ้าไม่ตรงกัน body_text ใน index ค้นหาจะสลับไปมาทุกครั้งที่มีคนเปิดหน้า
+function tableText(content: unknown): string {
+  if (content === null || typeof content !== 'object') return ''
+  const rows = (content as { rows?: unknown }).rows
+  if (!Array.isArray(rows)) return ''
+
+  return rows
+    .map((row) => {
+      const cells = (row as { cells?: unknown }).cells
+      if (!Array.isArray(cells)) return ''
+      return cells
+        .map((cell) =>
+          Array.isArray(cell) ? extractText(cell) : extractText((cell as { content?: unknown })?.content),
+        )
+        .filter((text) => text.length > 0)
+        .join(' ')
     })
     .filter((line) => line.length > 0)
     .join('\n')

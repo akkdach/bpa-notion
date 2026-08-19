@@ -83,6 +83,11 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # รูปที่ผู้ใช้อัปโหลด — ต้องอยู่นอก container ไม่งั้นหายตอน recreate
+      # ⚠️ โฟลเดอร์บนโฮสต์ต้องเขียนได้โดย uid 1000 (user `node` ใน image)
+      - ./uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy

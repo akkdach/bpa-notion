@@ -44,6 +44,12 @@ const schema = z.object({
 
   /** origin ที่เรียก API ได้ — คั่นด้วยจุลภาคเมื่อมีหลายอัน */
   WEB_ORIGIN: z.string().default('http://localhost'),
+
+  /**
+   * โฟลเดอร์เก็บไฟล์รูปที่ผู้ใช้อัปโหลด — บน docker ต้องเป็น path ที่ mount
+   * volume ไว้ ไม่งั้นไฟล์หายทุกครั้งที่ recreate container
+   */
+  UPLOAD_DIR: z.string().default('uploads'),
 });
 
 export type Env = z.infer<typeof schema>;

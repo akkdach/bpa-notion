@@ -9,6 +9,7 @@ import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { ResponseEnvelopeInterceptor } from './common/response-envelope.interceptor.js';
 import { DbModule } from './db/db.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
+import { FilesModule } from './files/files.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PagesModule } from './pages/pages.module.js';
 import { SearchModule } from './search/search.module.js';
@@ -32,6 +33,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module.js';
     WorkspacesModule,
     PagesModule,
     DocumentsModule,
+    FilesModule,
     SearchModule,
     CollaborationModule,
     HealthModule,
