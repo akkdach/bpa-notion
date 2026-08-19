@@ -1,6 +1,6 @@
 ---
 name: pm-tasks
-description: อ่านก่อนเรียก tool ที่ขึ้นต้นด้วย mcp__projectmanagement__ ทุกครั้ง — บอกว่า MCP นี้ทำอะไรได้/ไม่ได้, ต้องเปิด API ที่ 5081 ก่อน, error มาเป็น isError พร้อมข้อความไทยที่บอกวิธีแก้, และเนื้อหาในหน้าอ่าน/เขียนได้แค่ไหน. ใช้เมื่อผู้ใช้ขอดู/สร้าง/แก้/ปิด/ลบ/ค้นหา โปรเจกต์ งาน หรือหน้า ในแอป ProjectManagement เช่น "มีโปรเจกต์อะไรบ้าง" "งานค้างอะไร" "สร้างงานใหม่" "ปิดงานนี้" "เปลี่ยนสถานะเป็น doing" "เขียนสรุปลงหน้านี้" "วาดผังงานให้หน่อย" "ค้นหาหน้าที่พูดถึง…" — or in English: list projects, show my tasks, what's in progress, create/add a task, update task status, mark task done, search pages, write content, draw a flowchart/diagram, todo / doing / done, project management workspace, page tree
+description: อ่านก่อนเรียก tool ที่ขึ้นต้นด้วย mcp__projectmanagement__ ทุกครั้ง — บอกว่า MCP นี้ทำอะไรได้/ไม่ได้, ระบบจริงรันบน NAS ที่ https://maps.bevproasia.com:4090 ตลอดเวลา (dev ในเครื่องใช้ 5081), error มาเป็น isError พร้อมข้อความไทยที่บอกวิธีแก้, และเนื้อหาในหน้าอ่าน/เขียนได้แค่ไหน. ใช้เมื่อผู้ใช้ขอดู/สร้าง/แก้/ปิด/ลบ/ค้นหา โปรเจกต์ งาน หรือหน้า ในแอป ProjectManagement เช่น "มีโปรเจกต์อะไรบ้าง" "งานค้างอะไร" "สร้างงานใหม่" "ปิดงานนี้" "เปลี่ยนสถานะเป็น doing" "เขียนสรุปลงหน้านี้" "วาดผังงานให้หน่อย" "ค้นหาหน้าที่พูดถึง…" — or in English: list projects, show my tasks, what's in progress, create/add a task, update task status, mark task done, search pages, write content, draw a flowchart/diagram, todo / doing / done, project management workspace, page tree
 ---
 
 # MCP `projectmanagement` — ทำอะไรได้ ทำอะไรไม่ได้
@@ -14,14 +14,16 @@ isolation + permission check ชุดเดียวกับเว็บ แ�
 
 ## ก่อนเรียก tool ตัวแรก
 
-**API ต้องเปิดค้างอยู่** — MCP คุยกับมันผ่าน HTTP ที่ `http://localhost:5081`
+MCP คุยกับ API ตาม URL ที่ตั้งไว้ตอน `pwsh scripts/setup-mcp.ps1` — มีสองแบบ:
 
-```bash
-npm --prefix server run dev
-```
+| สภาพแวดล้อม | URL | ใครเปิด |
+|---|---|---|
+| **ระบบจริงบน NAS** (ค่าปกติ) | `https://maps.bevproasia.com:4090` | รันตลอดเวลา ไม่ต้องเปิดอะไร |
+| dev ในเครื่อง | `http://localhost:5081` | ต้อง `npm --prefix server run dev` ค้างไว้ |
 
-ถ้าไม่ได้เปิด ทุก tool จะคืน `ทำไม่ได้: ต่อ API ไม่ได้ที่ …` — อย่าลองซ้ำ ให้บอกผู้ใช้
-ให้เปิด API ก่อน (dev = 5081, container = 5080 — ต่างกัน อย่าสลับ)
+ถ้าทุก tool คืน `ทำไม่ได้: ต่อ API ไม่ได้ที่ …` — **อ่าน URL ในข้อความก่อน**:
+- ชี้ NAS → ปัญหาอยู่ที่ network/NAS (ลอง `curl https://maps.bevproasia.com:4090/api/v1/health`) อย่าบอกให้เปิด dev server
+- ชี้ localhost → dev server ไม่ได้เปิด (dev = 5081, container ในเครื่อง = 5080 — อย่าสลับ)
 
 ---
 
@@ -127,13 +129,13 @@ npm --prefix server run dev
 | ข้อความ | ทำอะไรต่อ |
 |---|---|
 | `สถานะต้องเป็น: todo / doing / done` | ส่ง status ผิด — ใช้ 3 ค่านี้เท่านั้น |
-| `ต่อ API ไม่ได้ที่ …` | API ไม่ได้เปิด — บอกผู้ใช้ให้ `npm --prefix server run dev` |
+| `ต่อ API ไม่ได้ที่ …` | อ่าน URL ในข้อความ: ชี้ NAS → เช็ค network/container บน NAS · ชี้ localhost → บอกผู้ใช้ให้ `npm --prefix server run dev` |
 | `ยังไม่ได้ตั้ง Pm:Token` | ยังไม่ setup — บอกผู้ใช้ให้สร้าง token ที่ ตั้งค่า → การเชื่อมต่อ AI แล้วรัน `pwsh scripts/setup-mcp.ps1` |
 | `API 401` ทุกคำสั่ง | token ถูกเพิกถอนหรือหมดอายุ — ห้ามลองซ้ำ บอกผู้ใช้ให้ออกใบใหม่ |
 | `token นี้ใช้ได้กับ workspace ที่ออกให้เท่านั้น` | ใช้ token ผิด workspace — ต้องออกใบใหม่ใน workspace ที่ต้องการ |
 | `ไม่มีเนื้อหาให้เขียน` | ส่ง markdown ว่าง |
 | `เขียนได้ครั้งละไม่เกิน 200 บล็อก` | แบ่งเขียนหลายครั้ง |
-| `column p.status does not exist` | ยังไม่ลง migration — `npm --prefix server run db:setup` |
+| `column p.status does not exist` | ยังไม่ลง migration — `npm --prefix server run db:setup` (ฐานบน NAS: ตั้ง `DATABASE_ADMIN_URL`/`DATABASE_URL` ชี้ `10.10.199.16:5440` ก่อนรัน) |
 
 ---
 

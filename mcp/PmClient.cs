@@ -26,7 +26,12 @@ namespace ProjectManagementMcp;
 // ═══════════════════════════════════════════════════════════════════════════
 public sealed class PmClient(IConfiguration configuration)
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        // ดูเหตุผลที่ FlexibleDateTimeOffsetConverter — API รุ่น NestJS ส่งวันที่
+        // แบบ postgres ที่ตัว default ของ System.Text.Json อ่านไม่ออก
+        Converters = { new FlexibleDateTimeOffsetConverter() },
+    };
 
     private readonly HttpClient _http = new();
     private readonly SemaphoreSlim _workspaceLock = new(1, 1);
@@ -255,4 +260,10 @@ public sealed class PmClient(IConfiguration configuration)
         Guid pageId, string markdown, CancellationToken ct)
         => SendAsync<AppendResult>(HttpMethod.Post,
             $"/api/v1/pages/{pageId}/content/markdown", new { markdown }, ct);
+
+    /// <summary>เขียนทับเนื้อหาทั้งหน้า — ของเดิมถูกแทนที่ทั้งหมด</summary>
+    public Task<AppendResult> ReplaceMarkdownAsync(
+        Guid pageId, string markdown, CancellationToken ct)
+        => SendAsync<AppendResult>(HttpMethod.Post,
+            $"/api/v1/pages/{pageId}/content/replace", new { markdown }, ct);
 }

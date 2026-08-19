@@ -391,8 +391,8 @@ public static class TaskTools
     [McpServerTool(Name = "add_note", Title = "เขียนบันทึกความคืบหน้า",
                    ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("เขียนบันทึกความคืบหน้าต่อท้ายหน้า — ใช้รายงานสิ่งที่ทำไป ตั้งคำถาม " +
-                 "หรือสรุปให้เจ้าของอ่าน. บันทึกต่อท้ายอย่างเดียว แก้หรือลบไม่ได้. " +
-                 "นี่คือวิธีเดียวที่เขียนข้อความลงในระบบได้ — เนื้อหาของหน้าเองแก้ไม่ได้")]
+                 "หรือสรุปให้เจ้าของอ่าน. บันทึกต่อท้ายอย่างเดียว แก้หรือลบไม่ได้ " +
+                 "(ส่วนเนื้อหาของหน้าใช้ append_content / replace_content)")]
     public static Task<CallToolResult> AddNote(
         PmClient client,
         [Description("id ของหน้า/งานที่จะเขียนบันทึกใส่")] Guid pageId,
@@ -417,7 +417,8 @@ public static class TaskTools
                  "เป็นบันทึกแยกใต้เอกสาร). รับ markdown: หัวข้อ (#), รายการ (-, 1., - [x]), " +
                  "คำพูด (>), เส้นคั่น (---), ตัวหนา/เอียง/ขีดฆ่า/โค้ด/ลิงก์ และบล็อกโค้ด (```). " +
                  "```mermaid จะแสดงเป็นแผนภาพจริงในเบราว์เซอร์ — ใช้วาดผังงาน ผังลำดับ แกนต์ได้. " +
-                 "ตาราง/รูป/HTML จะถูกลดรูปแล้วรายงานกลับ. ต่อท้ายอย่างเดียว แก้หรือลบของเดิมไม่ได้")]
+                 "ตาราง/รูป/HTML จะถูกลดรูปแล้วรายงานกลับ. ต่อท้ายอย่างเดียว — " +
+                 "ถ้าต้องแก้หรือลบของเดิม ใช้ replace_content")]
     public static Task<CallToolResult> AppendContent(
         PmClient client,
         [Description("id ของหน้า")] Guid pageId,
@@ -440,6 +441,44 @@ public static class TaskTools
         }
 
         return message + "\n(ผู้ใช้จะเห็นในเอกสารทันทีที่เปิดหน้านั้น)";
+    });
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  ⚠️ Destructive = true โดยเจตนา — เป็น tool เดียวที่ทำให้เนื้อหาที่คนเขียน
+    //     "หายไปจากหน้า" ได้ (ประวัติใน update log ยังอยู่ แต่ไม่มีปุ่มกู้คืน)
+    //     host จึงควรขอคำยืนยันก่อน และคำอธิบายบังคับให้อ่านหน้าก่อนเขียนทับ
+    // ─────────────────────────────────────────────────────────────────────
+    [McpServerTool(Name = "replace_content", Title = "เขียนทับเนื้อหาทั้งหน้า",
+                   ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false)]
+    [Description("เขียนทับ \"เนื้อหาของหน้า\" ทั้งหน้าด้วย markdown ชุดใหม่ — ของเดิมถูกแทนที่" +
+                 "ทั้งหมดและกู้คืนเองไม่ได้ ใช้เมื่อต้องแก้/จัดระเบียบ/ลบเนื้อหาเดิมเท่านั้น " +
+                 "ถ้าแค่เพิ่มต่อท้ายให้ใช้ append_content. ต้อง get_page อ่านเนื้อหาปัจจุบันก่อนเสมอ " +
+                 "แล้วส่งเนื้อหาฉบับเต็ม (ส่วนที่คงไว้ + ส่วนที่แก้) กลับมา. รับ markdown ชุดเดียวกับ " +
+                 "append_content (```mermaid → แผนภาพ, ตาราง/รูป/HTML ถูกลดรูปแล้วรายงานกลับ). " +
+                 "บันทึก (add_note) ไม่ถูกแตะ — มันแยกจากเนื้อหาหน้า")]
+    public static Task<CallToolResult> ReplaceContent(
+        PmClient client,
+        [Description("id ของหน้า")] Guid pageId,
+        [Description("เนื้อหาใหม่ทั้งหน้าเป็น markdown (ไม่เกิน 100,000 ตัวอักษร และ 200 บล็อก)")]
+        string markdown,
+        CancellationToken ct = default) => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+            throw new ToolException(
+                "ไม่มีเนื้อหาให้เขียน — replace_content ใช้ล้างหน้าให้ว่างไม่ได้ " +
+                "ต้องส่งเนื้อหาใหม่อย่างน้อยหนึ่งบรรทัด");
+
+        var result = await client.ReplaceMarkdownAsync(pageId, markdown, ct);
+
+        var message = $"เขียนทับเนื้อหาหน้าแล้ว {result.BlockCount} บล็อก  id={pageId}";
+
+        // ⚠️ ต้องรายงานสิ่งที่ถูกลดรูปกลับไปเสมอ — เหตุผลเดียวกับ append_content
+        if (result.Warnings.Count > 0)
+        {
+            message += "\n" + string.Join("\n", result.Warnings.Select(w => $"⚠️ {w}"));
+        }
+
+        return message + "\n(ของเดิมถูกแทนที่ทั้งหมด — ผู้ใช้จะเห็นทันทีที่เปิดหน้านั้น)";
     });
 
     [McpServerTool(Name = "restore_page", Title = "กู้คืนหน้าจากถังขยะ",

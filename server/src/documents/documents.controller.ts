@@ -123,6 +123,21 @@ export class DocumentsController {
     return unwrap(await this.documents.appendMarkdown(pageId, body.markdown));
   }
 
+  /**
+   * ⚠️ เส้นเดียวที่ "ลบ" เนื้อหาเดิมได้ — เขียนทับทั้งหน้าด้วย markdown ชุดใหม่
+   *    ยังเป็น delta ปกติของ CRDT (ประวัติใน update log อยู่ครบ) แต่สำหรับ
+   *    ผู้ใช้แล้วของเดิมหายไปจริง ผู้เรียกควรอ่าน /content ก่อนเสมอ
+   */
+  @Post('content/replace')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'เขียนทับเนื้อหาทั้งหน้าด้วย markdown — ของเดิมถูกแทนที่ทั้งหมด' })
+  async replaceMarkdown(
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Body(zodBody(appendMarkdownSchema)) body: AppendMarkdownInput,
+  ) {
+    return unwrap(await this.documents.replaceMarkdown(pageId, body.markdown));
+  }
+
   @Post('projection')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'plain text ที่ client แกะจาก Y.Doc — ใช้ทำ index ค้นหาและ title' })

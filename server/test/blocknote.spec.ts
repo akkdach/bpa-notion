@@ -23,6 +23,7 @@ import {
   markdownToBlocks,
   paragraphBlocks,
   readPlainText,
+  replaceBlocks,
 } from '../src/documents/blocknote.js';
 
 /** ประกอบเอกสารจาก update ทั้งหมด แล้วตรวจด้วย schema จริงของ BlockNote */
@@ -157,6 +158,43 @@ describe('เขียนลง Y.Doc', () => {
 
   it('บล็อกว่าง → ไม่เขียนอะไรเลย', async () => {
     expect(await appendBlocks([], [])).toBeNull();
+  });
+});
+
+describe('เขียนทับทั้งเอกสาร', () => {
+  it('ของเดิมหายหมด เหลือเฉพาะชุดใหม่ และรูปร่างผ่าน schema', async () => {
+    const first = await appendBlocks([], paragraphBlocks(['ของเดิมหนึ่ง', 'ของเดิมสอง']));
+    const replaced = await replaceBlocks([first!.update], await markdownToBlocks('# ใหม่\n\nเนื้อหาใหม่'));
+
+    expect(replaced).not.toBeNull();
+
+    const { types, text } = await inspect([first!.update, replaced!.update]);
+    expect(types).toEqual(['heading', 'paragraph']);
+    expect(text).toContain('ใหม่');
+    expect(text).not.toContain('ของเดิมหนึ่ง');
+    expect(text).not.toContain('ของเดิมสอง');
+  });
+
+  it('เอกสารว่าง → เท่ากับเขียนครั้งแรก', async () => {
+    const written = await replaceBlocks([], paragraphBlocks(['เดียว']));
+
+    expect(written).not.toBeNull();
+    expect(await readPlainText([written!.update])).toBe('เดียว');
+  });
+
+  it('ยังเป็น delta — client ที่มีของเดิมรวม update แล้วเห็นตรงกับคนโหลดใหม่', async () => {
+    // ⚠️ จุดที่พังได้ของ replace: ถ้าไปล้าง fragment แบบไม่ผ่าน diff ผลรวม
+    //    ของ (ของเดิม + update ใหม่) กับ (update ใหม่ที่ประกอบบนเอกสารเปล่า)
+    //    จะไม่ตรงกัน แล้วสอง client เห็นเนื้อหาคนละแบบ
+    const first = await appendBlocks([], paragraphBlocks(['หนึ่ง', 'สอง', 'สาม']));
+    const replaced = await replaceBlocks([first!.update], paragraphBlocks(['ใหม่']));
+
+    const merged = await inspect([first!.update, replaced!.update]);
+    expect(merged.text).toBe('ใหม่');
+  });
+
+  it('บล็อกว่าง → ไม่เขียนอะไรเลย', async () => {
+    expect(await replaceBlocks([], [])).toBeNull();
   });
 });
 

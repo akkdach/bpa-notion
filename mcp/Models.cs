@@ -1,9 +1,38 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace ProjectManagementMcp;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  DTO สำหรับ deserialize response ของ API (camelCase, case-insensitive)
 //  ตรงกับ api/Helpers/ApiResponse.cs และ api/DTOs/*
 // ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// รับ timestamp ได้ทั้ง ISO 8601 และรูปแบบ postgres ที่ API รุ่น NestJS ส่งมา
+/// </summary>
+/// <remarks>
+/// ⚠️ NestJS + Drizzle ส่ง timestamptz เป็น "2026-08-19 06:35:00.839796+00"
+///    (ช่องว่างคั่น ไม่มีตัว T) ซึ่ง System.Text.Json ไม่รับ — deserialize ทั้ง
+///    envelope จะพังเงียบ ๆ แล้วกลายเป็น "API 200: OK (no_code)" ทุก tool ที่
+///    model มี field วันที่ ส่วน API รุ่น .NET เดิมส่ง ISO ตรง ๆ จึงต้องรับทั้งคู่
+/// </remarks>
+internal sealed class FlexibleDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
+{
+    public override DateTimeOffset Read(
+        ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TryGetDateTimeOffset(out var iso)) return iso;
+
+        return DateTimeOffset.Parse(
+            reader.GetString()!, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options)
+        => writer.WriteStringValue(value);
+}
 
 public sealed record Envelope<T>(bool Success, T? Data, string? Message, string? Code);
 
@@ -70,7 +99,12 @@ public sealed record PageNote(
 /// สิ่งที่ถูกลดรูป (ตาราง รูป HTML การซ้อนที่ลึกเกิน) — ต้องส่งต่อให้โมเดลเห็นเสมอ
 /// ไม่ใช่กลืนไว้ ไม่งั้นมันจะเชื่อว่าเขียนของที่ระบบรับไม่ได้ลงไปสำเร็จแล้ว
 /// </param>
-public sealed record AppendResult(long Seq, int BlockCount, IReadOnlyList<string> Warnings);
+// ⚠️ NestJS ส่ง field ชื่อ "blocks" (รุ่น .NET เดิมส่ง "blockCount") — ไม่ map ชื่อ
+//    จะได้ 0 เงียบ ๆ ทุกครั้งแล้วรายงานผู้ใช้ผิด
+public sealed record AppendResult(
+    long Seq,
+    [property: JsonPropertyName("blocks")] int BlockCount,
+    IReadOnlyList<string> Warnings);
 
 /// <summary>ผลค้นหา — ผลของ GET /api/v1/search</summary>
 public sealed record SearchResult(

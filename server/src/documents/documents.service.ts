@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { appendBlocks, blocksToPlainText, markdownToBlocks, paragraphBlocks, type Block } from './blocknote.js';
+import {
+  appendBlocks,
+  blocksToPlainText,
+  markdownToBlocks,
+  paragraphBlocks,
+  replaceBlocks,
+  type Block,
+} from './blocknote.js';
 import { DocRepository } from './doc.repository.js';
 import type {
   AppendResultDto,
@@ -338,13 +345,56 @@ export class DocumentService {
     return ok({ seq: written.value, blocks: blocks.length, warnings: [] });
   }
 
+  /**
+   * เขียนทับเนื้อหาทั้งหน้าด้วย markdown ชุดใหม่
+   *
+   * ⚠️ ทางเดียวใน API ที่ "ลบ" เนื้อหาเดิมได้ — ด่านตรวจเหมือน append ทุกข้อ
+   *    และประวัติใน update log ยังอยู่ แต่ไม่มีเครื่องมือ restore ให้ผู้ใช้
+   *    ผู้เรียกจึงควรอ่านเนื้อหาปัจจุบันก่อนเสมอ
+   */
+  async replaceMarkdown(pageId: string, markdown: string): Promise<Result<AppendResultDto>> {
+    const source = (markdown ?? '').replaceAll('\r\n', '\n');
+
+    if (source.trim().length === 0) return err.validation('ไม่มีเนื้อหาให้เขียน', 'no_markdown');
+
+    if (source.length > MAX_PROJECTION_LENGTH) {
+      return err.validation(
+        `เนื้อหายาวเกิน ${MAX_PROJECTION_LENGTH.toLocaleString()} ตัวอักษร — แบ่งเขียนหลายครั้ง`,
+        'markdown_too_long',
+      );
+    }
+
+    let blocks: Block[];
+    try {
+      blocks = await markdownToBlocks(source);
+    } catch (error) {
+      this.logger.error(`แปลง markdown ไม่สำเร็จสำหรับหน้า ${pageId}: ${String(error)}`);
+      return err.validation('อ่าน markdown ไม่ออก', 'markdown_parse_failed');
+    }
+
+    if (blocks.length === 0) return err.validation('ไม่มีเนื้อหาให้เขียน', 'no_markdown');
+
+    if (blocks.length > MAX_BLOCKS_PER_CALL) {
+      return err.validation(`เขียนได้ครั้งละไม่เกิน ${MAX_BLOCKS_PER_CALL} บล็อก`, 'too_many_blocks');
+    }
+
+    const written = await this.writeBlocks(pageId, blocks, 'replace');
+    if (!written.ok) return written;
+
+    return ok({ seq: written.value, blocks: blocks.length, warnings: [] });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   //  ทางเขียนจริง — ใช้ร่วมกันทั้งย่อหน้าและ markdown
   //
   //  รวมไว้ที่เดียวโดยเจตนา: ส่วนที่พังแล้วเจ็บ (สิทธิ์ · อ่านสถานะก่อนเขียน ·
   //  ทำ diff · projection) ต้องมีฉบับเดียว ไม่ใช่สองฉบับที่ค่อย ๆ เพี้ยนจากกัน
   // ═══════════════════════════════════════════════════════════════════════
-  private async writeBlocks(pageId: string, blocks: Block[]): Promise<Result<number>> {
+  private async writeBlocks(
+    pageId: string,
+    blocks: Block[],
+    mode: 'append' | 'replace' = 'append',
+  ): Promise<Result<number>> {
     const role = await this.permissions.effectiveRole(pageId);
     if (!role) return PAGE_NOT_FOUND;
     if (!canEdit(role)) return NO_EDIT_PERMISSION;
@@ -354,11 +404,12 @@ export class DocumentService {
 
     // ⚠️ ต้องอ่านสถานะจริงก่อน ไม่ใช่เขียนทับ — เพื่อให้ update ที่ได้รวมกับ
     //    สิ่งที่ client อื่นเขียนพร้อมกันได้ตามปกติของ CRDT
+    //    (replace ก็เช่นกัน — มันคือ diff กับโครงเดิม ไม่ใช่การล้าง log)
     const frames = await this.docs.readFrames(pageId);
 
     let written: { update: Uint8Array; clientId: number } | null;
     try {
-      written = await appendBlocks(frames, blocks);
+      written = mode === 'replace' ? await replaceBlocks(frames, blocks) : await appendBlocks(frames, blocks);
     } catch (error) {
       this.logger.error(`สร้าง Yjs update ไม่สำเร็จสำหรับหน้า ${pageId}: ${String(error)}`);
       return err.unavailable('เขียนเนื้อหาไม่สำเร็จ', 'yjs_write_failed');
@@ -383,7 +434,7 @@ export class DocumentService {
     //     จะไม่คงที่
     // ─────────────────────────────────────────────────────────────────────
     const projection = await this.docs.getProjection(pageId);
-    const body = projection?.bodyText ?? '';
+    const body = mode === 'replace' ? '' : (projection?.bodyText ?? '');
     const addition = blocksToPlainText(blocks);
 
     await this.docs.upsertProjection({

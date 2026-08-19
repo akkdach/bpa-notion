@@ -190,6 +190,43 @@ export async function appendBlocks(
   return { update, clientId: doc.clientID };
 }
 
+/**
+ * เขียนทับเนื้อหาทั้งเอกสารด้วยบล็อกชุดใหม่ แล้วคืน "ส่วนต่าง" แบบเดียวกับ
+ * appendBlocks
+ *
+ * ⚠️ ไม่ได้ล้างแล้วเขียนใหม่ — ส่งเอกสารใหม่เข้า updateYFragment ตรง ๆ ให้มัน
+ *    diff กับโครงเดิม จึงยังเป็น delta ที่ client อื่นรวมได้ และส่วนที่เหมือน
+ *    ของเดิม (เช่นหัวเรื่องที่ไม่เปลี่ยน) ไม่ถูกแตะเลย
+ *
+ * ⚠️ ประวัติใน update log ยังอยู่ครบ — การเขียนทับกู้คืนได้ในระดับข้อมูล
+ *    แต่ยังไม่มีเครื่องมือ restore อัตโนมัติ ผู้เรียกต้องถือว่านี่คือการลบ
+ */
+export async function replaceBlocks(
+  existingUpdates: readonly Uint8Array[],
+  blocks: Block[],
+): Promise<{ update: Uint8Array; clientId: number } | null> {
+  if (blocks.length === 0) return null;
+
+  const { prosemirrorToYXmlFragment } = await import('y-prosemirror');
+
+  const doc = new Y.Doc();
+  const fragment = doc.getXmlFragment(FRAGMENT_NAME);
+
+  for (const update of existingUpdates) {
+    if (update.length > 0) Y.applyUpdate(doc, update);
+  }
+
+  const before = Y.encodeStateVector(doc);
+  const replacement = (await editorWith(blocks)).prosemirrorState.doc;
+
+  doc.transact(() => prosemirrorToYXmlFragment(replacement, fragment));
+
+  const update = Y.encodeStateAsUpdate(doc, before);
+  if (update.length === 0) return null;
+
+  return { update, clientId: doc.clientID };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  อ่านเนื้อหาเป็นข้อความล้วน
 //
