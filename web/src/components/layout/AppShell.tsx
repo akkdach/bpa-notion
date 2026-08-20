@@ -4,6 +4,7 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { ScrollPane } from './ScrollPane'
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  AppShell — โครงหน้าจอ ไม่รู้จัก domain อะไรเลย
@@ -73,8 +74,9 @@ export function AppShell({
           </button>
         </header>
 
-        {/* content-scroll — แถบเลื่อนจริงที่มองเห็น/ลากได้ตลอด (ดู index.css) */}
-        <main className="content-scroll min-h-0 flex-1 overflow-auto">{children}</main>
+        {/* ScrollPane วาดแถบเลื่อนเอง — แถบของ OS ถูกซ่อนตามการตั้งค่า Windows
+            ได้ ซึ่งทำให้ผู้ใช้หาที่ลากไม่เจอ (ดูเหตุผลเต็มในไฟล์นั้น) */}
+        <ScrollPane>{children}</ScrollPane>
       </div>
     </div>
   )

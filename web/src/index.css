@@ -199,36 +199,12 @@
    โผล่เฉพาะตอนเลื่อน ผู้ใช้จึงคิดว่า "ไม่มีแถบเลื่อน" และหาที่ลากไม่เจอ
    → บังคับวาดแถบจริงให้เห็นและลากได้ตลอดเวลา
    ═══════════════════════════════════════════════════════════════════════ */
-/* ⚠️ สีของหัวจับต้องเป็น --muted-foreground ไม่ใช่ --border
-   --border สว่าง 92% บนพื้นขาว (และขาวจาง 12% บนพื้นดำ) = มองไม่เห็นทั้งสองธีม
-   ซึ่งเท่ากับไม่ได้แก้ปัญหาเดิมเลย
-
-   ⚠️ เมื่อประกาศ scrollbar-width/-color (มาตรฐาน) เบราว์เซอร์รุ่นใหม่จะ
-   "เมิน" กฎ ::-webkit-scrollbar-* ทั้งหมด — กฎ webkit ข้างล่างจึงมีไว้เป็น
-   fallback ของ Safari/Chrome รุ่นเก่าเท่านั้น ต้องตั้งสีให้ตรงกันทั้งสองชุด */
-.content-scroll {
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--muted-foreground) transparent;
+/* ซ่อนแถบเลื่อนของ OS ในกล่องที่ ScrollPane วาดแถบเองแล้ว — ไม่งั้นได้สองแถบ */
+.no-native-scrollbar {
+  scrollbar-width: none;
 }
 
-.content-scroll::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
-
-.content-scroll::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
-  border: 3px solid transparent;
-  border-radius: 9999px;
-  background-clip: content-box;
-}
-
-.content-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--foreground);
-  background-clip: content-box;
-}
-
-.content-scroll::-webkit-scrollbar-track {
-  background: transparent;
+.no-native-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
