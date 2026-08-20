@@ -43,9 +43,11 @@ function ScrollBar({
       )}
       {...props}
     >
+      {/* ⚠️ ห้ามใช้ bg-border — สว่าง 92% บนพื้นขาว / ขาวจาง 12% บนพื้นดำ
+          ผลคือมีแถบเลื่อนอยู่แต่มองไม่เห็น ผู้ใช้จึงคิดว่าเลื่อนไม่ได้ */}
       <ScrollAreaPrimitive.Thumb
         data-slot="scroll-area-thumb"
-        className="relative flex-1 rounded-full bg-border"
+        className="relative flex-1 rounded-full bg-muted-foreground/60"
       />
     </ScrollAreaPrimitive.Scrollbar>
   )
