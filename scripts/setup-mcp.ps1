@@ -1,7 +1,12 @@
 ﻿# ═══════════════════════════════════════════════════════════════════════════
 #  ตั้งค่า MCP server ให้ Claude Code เรียกใช้ได้ — ครั้งเดียวจบ
 #
-#      pwsh scripts/setup-mcp.ps1
+#      pwsh scripts/setup-mcp.ps1                    (PowerShell 7)
+#      powershell -File scripts\setup-mcp.ps1        (Windows PowerShell 5.1 ที่ติดมากับ Windows)
+#
+#  ⚠️ `pwsh` คือ PowerShell 7 ซึ่ง "ไม่ได้ติดมากับ Windows" — เครื่องที่ยังไม่ได้
+#     ลงจะขึ้น "'pwsh' is not recognized" ให้ใช้บรรทัดที่สองแทน สคริปต์นี้รันได้
+#     ทั้งสองรุ่น (ไฟล์เซฟเป็น UTF-8 พร้อม BOM แล้ว 5.1 จึงอ่านคอมเมนต์ไทยถูก)
 #
 #  ทำสองอย่าง:
 #    1. build mcp/ เป็น Release (.mcp.json ชี้ไปที่ .dll ตัวนั้น)
@@ -42,6 +47,14 @@
 #  รันซ้ำได้เสมอ — ทับค่าเดิม
 # ═══════════════════════════════════════════════════════════════════════════
 $ErrorActionPreference = 'Stop'
+
+# ⚠️ Windows PowerShell 5.1 บางเครื่องยังต่อ HTTPS ด้วย TLS 1.0 เป็นค่าเริ่มต้น
+#    ทำให้ Invoke-RestMethod ล้มด้วย "could not create SSL/TLS secure channel"
+#    ซึ่งอ่านแล้วเดาไม่ออกว่าเป็นเรื่อง TLS — บังคับ 1.2 ไว้ก่อนเลย
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
 
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root 'mcp'
