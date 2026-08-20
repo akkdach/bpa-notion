@@ -190,3 +190,39 @@
   color: var(--foreground);
   white-space: pre-wrap;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   scrollbar ของพื้นที่เนื้อหาหลัก
+
+   body ไม่ scroll โดยออกแบบ (AppShell เป็น h-dvh overflow-hidden) — ตัวที่
+   เลื่อนคือ <main> ข้างใน ซึ่ง browser วาดเป็น overlay scrollbar บาง ๆ ที่
+   โผล่เฉพาะตอนเลื่อน ผู้ใช้จึงคิดว่า "ไม่มีแถบเลื่อน" และหาที่ลากไม่เจอ
+   → บังคับวาดแถบจริงให้เห็นและลากได้ตลอดเวลา
+   ═══════════════════════════════════════════════════════════════════════ */
+.content-scroll {
+  scrollbar-gutter: stable;
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.content-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.content-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+.content-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  background-clip: content-box;
+}
+
+.content-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

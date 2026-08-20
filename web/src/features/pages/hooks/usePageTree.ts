@@ -67,7 +67,8 @@ export function useUpdatePage() {
             ? {
                 ...node,
                 ...(input.title !== undefined ? { title: input.title } : {}),
-                ...(input.icon !== undefined ? { icon: input.icon } : {}),
+                // null = ล้างไอคอน → ฝั่ง cache เก็บเป็น undefined
+                ...(input.icon !== undefined ? { icon: input.icon ?? undefined } : {}),
                 // '' = ล้างสถานะ ต้องกลายเป็น undefined ไม่ใช่สตริงว่าง
                 ...(input.status !== undefined
                   ? { status: input.status === '' ? undefined : input.status }

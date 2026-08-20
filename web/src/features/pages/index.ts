@@ -1,4 +1,5 @@
 export { PageTree } from './components/PageTree'
+export { PageIconButton } from './components/PageIconButton'
 export { StatusChip } from './components/StatusChip'
 export { nextStatus, statusLabel, statusGlyph, statusTone } from './statusModel'
 export { TrashList } from './components/TrashList'

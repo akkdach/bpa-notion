@@ -13,7 +13,9 @@ export interface PageNode {
   id: string
   parentId: string | null
   title: string
-  icon?: string
+  /** ⚠️ API ส่ง null เมื่อไม่มีไอคอน ไม่ใช่ตัดฟิลด์ทิ้ง — ชนิดต้องบอกความจริง
+   *     ไม่งั้นโค้ดที่เช็คแค่ `!== undefined` จะพลาด null เงียบ ๆ */
+  icon?: string | null
   status?: PageStatus
   rank: string
   depth: number
@@ -33,8 +35,9 @@ export interface Page {
   rank: string
   kind: 'page' | 'database' | 'db_row'
   title: string
-  icon?: string
-  coverUrl?: string
+  /** null เมื่อไม่มีไอคอน (ดูหมายเหตุใน PageNode) */
+  icon?: string | null
+  coverUrl?: string | null
   status?: PageStatus
   accessRootId: string
   myRole: 'viewer' | 'commenter' | 'editor' | 'full'
@@ -59,7 +62,8 @@ export interface CreatePageInput {
  */
 export interface UpdatePageInput {
   title?: string
-  icon?: string
+  /** null = เอาไอคอนออก · undefined = ไม่แตะ (ตรงกับ updatePageSchema ฝั่ง API) */
+  icon?: string | null
   coverUrl?: string
   status?: PageStatus | ''
 }

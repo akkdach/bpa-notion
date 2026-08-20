@@ -73,7 +73,8 @@ export function AppShell({
           </button>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-auto">{children}</main>
+        {/* content-scroll — แถบเลื่อนจริงที่มองเห็น/ลากได้ตลอด (ดู index.css) */}
+        <main className="content-scroll min-h-0 flex-1 overflow-auto">{children}</main>
       </div>
     </div>
   )

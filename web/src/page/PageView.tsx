@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
-import { usePage } from '@/features/pages'
+import { PageIconButton, usePage, useUpdatePage } from '@/features/pages'
 import { PageEditor, useYDoc } from '@/features/editor'
 import { NotePanel, useAddNote, useNotes } from '@/features/activity'
 
@@ -9,6 +9,7 @@ import { NotePanel, useAddNote, useNotes } from '@/features/activity'
 // ═══════════════════════════════════════════════════════════════════════════
 export function PageView({ pageId }: { pageId: string }) {
   const page = usePage(pageId)
+  const updatePage = useUpdatePage()
   const { doc, status, reportProjection } = useYDoc(pageId)
   const notes = useNotes(pageId)
   const addNote = useAddNote(pageId)
@@ -52,6 +53,15 @@ export function PageView({ pageId }: { pageId: string }) {
     //     BlockNote ที่ลอยอยู่ทางซ้ายของบล็อกจะโดนตัดหายไปนอกจอ
     // ─────────────────────────────────────────────────────────────────────
     <article className="w-full px-12 py-12">
+      {/* ไอคอนหน้า — วางเหนือชื่อเรื่องแบบ Notion · แก้ได้เฉพาะ editor ขึ้นไป */}
+      <div className="mb-1 px-1">
+        <PageIconButton
+          icon={page.data?.icon}
+          canEdit={canEdit}
+          onChange={(icon) => updatePage.mutate({ pageId, input: { icon } })}
+        />
+      </div>
+
       <PageEditor
         doc={doc}
         status={status}
