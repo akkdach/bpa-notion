@@ -68,10 +68,14 @@ dotnet user-secrets list --project $project 2>$null | ForEach-Object {
 Write-Host ''
 Write-Host 'การเชื่อมต่อ' -ForegroundColor Cyan
 
-$apiHint = if ($existing['Pm:ApiUrl']) { " [$($existing['Pm:ApiUrl'])]" } else { ' [http://localhost:5081]' }
+# ⚠️ ค่าเริ่มต้นคือระบบจริงบน NAS ไม่ใช่ localhost — คนส่วนใหญ่ที่รันสคริปต์นี้
+#    ต้องการต่อระบบจริง ส่วน localhost:5081 ใช้เฉพาะตอนพัฒนาโดยเปิด dev server เอง
+$defaultApiUrl = 'https://maps.bevproasia.com:4090'
+$apiHint = if ($existing['Pm:ApiUrl']) { " [$($existing['Pm:ApiUrl'])]" } else { " [$defaultApiUrl]" }
+Write-Host "ระบบจริง: $defaultApiUrl  ·  dev ในเครื่อง: http://localhost:5081" -ForegroundColor DarkGray
 $apiUrl = Read-Host "URL ของ API$apiHint"
 if ([string]::IsNullOrWhiteSpace($apiUrl)) {
-    $apiUrl = if ($existing['Pm:ApiUrl']) { $existing['Pm:ApiUrl'] } else { 'http://localhost:5081' }
+    $apiUrl = if ($existing['Pm:ApiUrl']) { $existing['Pm:ApiUrl'] } else { $defaultApiUrl }
 }
 $apiUrl = $apiUrl.TrimEnd('/')
 $api = "$apiUrl/api/v1"
@@ -181,8 +185,12 @@ Write-Host 'ทุกอย่างที่ AI แก้ถูกบันท�
 Write-Host 'ดูย้อนหลังได้ที่หน้า ตรวจงาน → ฟีดกิจกรรม'
 Write-Host ''
 Write-Host 'ขั้นต่อไป:' -ForegroundColor Cyan
-Write-Host '  1. เปิด API ทิ้งไว้:   dotnet run --project api'
-Write-Host '  2. เปิด Claude Code ใหม่ในโฟลเดอร์นี้ แล้วอนุญาต MCP server ชื่อ projectmanagement'
+if ($apiUrl -like '*localhost*') {
+    Write-Host '  1. เปิด dev server ทิ้งไว้:   npm --prefix server run dev'
+} else {
+    Write-Host "  1. ไม่ต้องเปิดอะไรเพิ่ม — $apiUrl รันอยู่ตลอดเวลา"
+}
+Write-Host '  2. ปิด Claude Code แล้วเปิดใหม่ (ทุกโฟลเดอร์ใช้ได้ ไม่จำเป็นต้องอยู่ในโปรเจกต์นี้)'
 Write-Host '  3. ตรวจด้วยคำสั่ง /mcp — ต้องเห็น projectmanagement เป็น connected'
 Write-Host ''
 Write-Host 'เครื่องอื่นที่จะใช้ด้วย: ออก token คนละใบ อย่าใช้ใบเดียวกันสองเครื่อง' -ForegroundColor DarkGray
