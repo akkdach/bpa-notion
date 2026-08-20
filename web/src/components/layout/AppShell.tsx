@@ -1,7 +1,6 @@
 import { type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import { ScrollPane } from './ScrollPane'
@@ -20,7 +19,7 @@ import { ScrollPane } from './ScrollPane'
 interface AppShellProps {
   sidebarHeader: ReactNode
   sidebarBody: ReactNode
-  /** ท้ายแถบด้านข้าง — อยู่นอก ScrollArea จึงติดอยู่กับที่เมื่อรายการหน้ายาว */
+  /** ท้ายแถบด้านข้าง — อยู่นอกพื้นที่เลื่อน จึงติดอยู่กับที่เมื่อรายการหน้ายาว */
   sidebarFooter?: ReactNode
   children: ReactNode
   sidebarWidth: number
@@ -42,11 +41,13 @@ export function AppShell({
         <div style={{ width: sidebarWidth }} className="flex h-full flex-col">
           <div className="p-2">{sidebarHeader}</div>
           <Separator />
-          <ScrollArea className="flex-1">
+          {/* ใช้ ScrollPane เหมือนพื้นที่เนื้อหา — รายการหน้ายาวเกินจอแล้ว
+              ผู้ใช้ต้องเห็นว่าเลื่อนได้ ไม่ใช่แถบที่จางหายเองแบบของเดิม */}
+          <ScrollPane className="flex-1">
             <nav className="p-2" aria-label="หน้าทั้งหมด">
               {sidebarBody}
             </nav>
-          </ScrollArea>
+          </ScrollPane>
 
           {sidebarFooter !== undefined && (
             <>
@@ -76,7 +77,9 @@ export function AppShell({
 
         {/* ScrollPane วาดแถบเลื่อนเอง — แถบของ OS ถูกซ่อนตามการตั้งค่า Windows
             ได้ ซึ่งทำให้ผู้ใช้หาที่ลากไม่เจอ (ดูเหตุผลเต็มในไฟล์นั้น) */}
-        <ScrollPane>{children}</ScrollPane>
+        <main className="flex min-h-0 flex-1 flex-col">
+          <ScrollPane className="flex-1">{children}</ScrollPane>
+        </main>
       </div>
     </div>
   )

@@ -21,10 +21,13 @@ const MIN_THUMB_PX = 32
 
 interface ScrollPaneProps {
   children: ReactNode
+  /** className ของกล่องนอก — ใช้จัดขนาด/ตำแหน่ง (แถบเลื่อนวางทับกล่องนี้) */
   className?: string
+  /** className ของกล่องที่เลื่อนจริงข้างใน */
+  viewportClassName?: string
 }
 
-export function ScrollPane({ children, className }: ScrollPaneProps) {
+export function ScrollPane({ children, className, viewportClassName }: ScrollPaneProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startY: number; startScrollTop: number } | null>(null)
   const [thumb, setThumb] = useState({ top: 0, height: 0, visible: false })
@@ -101,9 +104,12 @@ export function ScrollPane({ children, className }: ScrollPaneProps) {
   }, [])
 
   return (
-    <main className="relative min-h-0 flex-1">
+    <div className={cn('relative min-h-0', className)}>
       {/* pr-3 กันเนื้อหาลอดไปอยู่ใต้แถบ · ซ่อนแถบของ OS เพื่อไม่ให้มีสองแถบ */}
-      <div ref={viewportRef} className={cn('h-full overflow-y-auto overflow-x-hidden pr-3 no-native-scrollbar', className)}>
+      <div
+        ref={viewportRef}
+        className={cn('h-full overflow-y-auto overflow-x-hidden pr-3 no-native-scrollbar', viewportClassName)}
+      >
         {children}
       </div>
 
@@ -131,6 +137,6 @@ export function ScrollPane({ children, className }: ScrollPaneProps) {
           />
         </div>
       )}
-    </main>
+    </div>
   )
 }
