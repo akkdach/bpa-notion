@@ -183,6 +183,35 @@ foreach ($stale in @('Pm:Email', 'Pm:Password', 'Pm:Workspace')) {
     }
 }
 
+# ─────────────────────────────────────────────────────────────────────────
+#  6. ลงทะเบียน MCP server กับ Claude Code แบบ user scope
+#
+#  ⚠️ ขั้นนี้เคยขาดไป แล้วทำให้เข้าใจผิดกันบ่อย: สคริปต์ตั้ง token ให้เรียบร้อย
+#     แต่ Claude Code ยังไม่รู้จัก server เลย มันรู้จักจาก .mcp.json ในโปรเจกต์นี้
+#     เท่านั้น — ซึ่งอ่านเฉพาะตอนเปิด Claude Code "ในโฟลเดอร์นี้" และ path ใน
+#     ไฟล์นั้นเป็นแบบสัมพัทธ์ พอไปเปิดในโปรเจกต์อื่นจึงไม่มี MCP ให้ใช้
+#
+#  user scope + path เต็ม = ใช้ได้ทุกโฟลเดอร์บนเครื่องนี้
+#  รันซ้ำได้: ถอนของเดิมก่อนเสมอ (ไม่มีอยู่ก็ไม่เป็นไร)
+# ─────────────────────────────────────────────────────────────────────────
+Write-Host ''
+if (Get-Command claude -ErrorAction SilentlyContinue) {
+    Write-Host 'กำลังลงทะเบียนกับ Claude Code (user scope)...' -ForegroundColor Cyan
+    claude mcp remove projectmanagement -s user 2>$null | Out-Null
+    claude mcp add --scope user projectmanagement -- dotnet $dll 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host '  ลงทะเบียนแล้ว — เรียกใช้ได้จากทุกโฟลเดอร์' -ForegroundColor Green
+    } else {
+        Write-Host '  ลงทะเบียนไม่สำเร็จ — สั่งเองได้ด้วย:' -ForegroundColor Yellow
+        Write-Host "    claude mcp add --scope user projectmanagement -- dotnet `"$dll`"" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host 'ไม่พบคำสั่ง claude — ข้ามการลงทะเบียน' -ForegroundColor Yellow
+    Write-Host 'ติดตั้ง Claude Code แล้วสั่งเองด้วย:' -ForegroundColor Yellow
+    Write-Host "  claude mcp add --scope user projectmanagement -- dotnet `"$dll`"" -ForegroundColor Yellow
+}
+
 Write-Host ''
 Write-Host 'ตั้งค่าเรียบร้อย' -ForegroundColor Green
 dotnet user-secrets list --project $project | ForEach-Object {
@@ -205,6 +234,10 @@ if ($apiUrl -like '*localhost*') {
 }
 Write-Host '  2. ปิด Claude Code แล้วเปิดใหม่ (ทุกโฟลเดอร์ใช้ได้ ไม่จำเป็นต้องอยู่ในโปรเจกต์นี้)'
 Write-Host '  3. ตรวจด้วยคำสั่ง /mcp — ต้องเห็น projectmanagement เป็น connected'
+Write-Host ''
+Write-Host 'หมายเหตุ: ถ้าเปิด Claude Code ในโฟลเดอร์โปรเจกต์นี้ อาจขึ้นเตือน' -ForegroundColor DarkGray
+Write-Host '"Conflicting scopes" เพราะมี .mcp.json ของโปรเจกต์ซ้ำกับที่เพิ่งลงทะเบียน' -ForegroundColor DarkGray
+Write-Host 'ไม่กระทบการใช้งาน — ตัว user scope ถูกใช้จริง' -ForegroundColor DarkGray
 Write-Host ''
 Write-Host 'เครื่องอื่นที่จะใช้ด้วย: ออก token คนละใบ อย่าใช้ใบเดียวกันสองเครื่อง' -ForegroundColor DarkGray
 Write-Host 'จะได้รู้ว่าเครื่องไหนใช้อยู่ และเพิกถอนทีละเครื่องได้เมื่อเครื่องหาย' -ForegroundColor DarkGray
