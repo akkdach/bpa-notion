@@ -77,6 +77,7 @@ PR ที่แก้โค้ดโดยไม่แก้เอกสาร�
 | `README.md` | ติดตั้ง · รัน dev · env ที่ต้องตั้ง |
 | `PLAN.md` / `PLAN-node.md` | สถาปัตยกรรม + phase (PLAN-node = การย้าย .NET → Node) |
 | `docs/ST-documentation-standard.md` | มาตรฐานชื่อไฟล์/โครงเอกสารของทีม |
-| `docs/connect-ai.md` · `docs/deploy-iis.md` | เอกสารเดิมก่อนมาตรฐาน ST — แตะเมื่อไหร่ให้ rename เป็น prefix ตามมาตรฐาน |
+| `docs/RB-connect-ai.md` | ขั้นตอนเชื่อม Claude Code เข้าระบบผ่าน MCP (ติดตั้งต่อเครื่อง) |
+| `docs/deploy-iis.md` | เอกสารเดิมก่อนมาตรฐาน ST — แตะเมื่อไหร่ให้ rename เป็น prefix ตามมาตรฐาน |
 | `mcp/README.md` | สัญญาของ MCP ↔ API ฉบับเต็ม |
 | `.claude/skills/pm-tasks/SKILL.md` | คู่มือ AI ใช้ MCP (โหลดเข้า session อัตโนมัติ) |

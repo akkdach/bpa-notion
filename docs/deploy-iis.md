@@ -254,4 +254,4 @@ pwsh scripts\setup-mcp.ps1
 ⚠️ `Pm:ApiUrl` **ห้ามใส่ `/api/v1`** — `PmClient` ต่อให้เองแล้ว ใส่ซ้ำจะกลายเป็น
 `/api/v1/api/v1/pages` → 404 (ต่างจาก `VITE_API_BASE_URL` ฝั่งเว็บที่ต้องมี — สับสนกันบ่อย)
 
-ดูคู่มือสำหรับลูกค้าเต็ม ๆ ที่ [docs/connect-ai.md](connect-ai.md)
+ดูคู่มือสำหรับลูกค้าเต็ม ๆ ที่ [docs/RB-connect-ai.md](RB-connect-ai.md)

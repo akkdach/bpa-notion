@@ -120,7 +120,7 @@ export function AiConnectionSettings({
             <code className="block font-mono break-all text-foreground">
               pwsh scripts/setup-mcp.ps1
             </code>
-            <p>สคริปต์จะถามหา token นี้ แล้วตั้งค่าให้เอง — ดูขั้นตอนเต็มใน docs/connect-ai.md</p>
+            <p>สคริปต์จะถามหา token นี้ แล้วตั้งค่าให้เอง — ดูขั้นตอนเต็มใน docs/RB-connect-ai.md</p>
           </div>
 
           <Button type="button" variant="ghost" size="sm" onClick={() => setCreated(null)}>
