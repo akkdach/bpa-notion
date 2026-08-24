@@ -1,6 +1,8 @@
 import { useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
-import { LastEditedBy, PageIconButton, useEditorName, usePage, useUpdatePage } from '@/features/pages'
+// "ใครแก้ล่าสุด" ไม่ได้อยู่ที่นี่แล้ว — ย้ายไปแถบบนสุดที่ไม่เลื่อนตามเนื้อหา
+// (ดู PageHeaderMeta) เพราะหน้ายาวกว่าจอแล้วบรรทัดนี้เลื่อนพ้นไปตอนกำลังอ่าน
+import { PageIconButton, usePage, useUpdatePage } from '@/features/pages'
 import { PageEditor, useYDoc } from '@/features/editor'
 import { NotePanel, useAddNote, useNotes } from '@/features/activity'
 
@@ -10,7 +12,6 @@ import { NotePanel, useAddNote, useNotes } from '@/features/activity'
 export function PageView({ pageId }: { pageId: string }) {
   const page = usePage(pageId)
   const updatePage = useUpdatePage()
-  const editorName = useEditorName()
   const { doc, status, reportProjection } = useYDoc(pageId)
   const notes = useNotes(pageId)
   const addNote = useAddNote(pageId)
@@ -62,15 +63,6 @@ export function PageView({ pageId }: { pageId: string }) {
           onChange={(icon) => updatePage.mutate({ pageId, input: { icon } })}
         />
 
-        {/* ⚠️ ต้องบอกว่าใครแก้ล่าสุด ไม่ใช่แค่เมื่อไหร่ — AI เป็นสมาชิกคนหนึ่งใน
-            workspace คำถามว่า "อันนี้ฉันแก้เองหรือ AI แก้" ต้องตอบได้จากหน้านี้ */}
-        {page.data !== undefined && (
-          <LastEditedBy
-            editor={editorName(page.data.lastEditedBy)}
-            updatedAt={page.data.updatedAt}
-            className="mt-1"
-          />
-        )}
       </div>
 
       <PageEditor

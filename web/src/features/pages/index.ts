@@ -1,6 +1,7 @@
 export { PageTree } from './components/PageTree'
 export { PageIconButton } from './components/PageIconButton'
 export { LastEditedBy } from './components/LastEditedBy'
+export { PageHeaderMeta } from './components/PageHeaderMeta'
 export { useEditorName } from './hooks/useEditorName'
 export type { EditorIdentity } from './hooks/useEditorName'
 export { StatusChip } from './components/StatusChip'

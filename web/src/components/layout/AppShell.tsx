@@ -17,6 +17,8 @@ import { ScrollPane } from './ScrollPane'
 // ═══════════════════════════════════════════════════════════════════════════
 
 interface AppShellProps {
+  /** แถบบนสุดที่ไม่เลื่อนตามเนื้อหา — ใช้บอกบริบทของหน้าที่เปิดอยู่ */
+  headerContent?: ReactNode
   sidebarHeader: ReactNode
   sidebarBody: ReactNode
   /** ท้ายแถบด้านข้าง — อยู่นอกพื้นที่เลื่อน จึงติดอยู่กับที่เมื่อรายการหน้ายาว */
@@ -28,7 +30,7 @@ interface AppShellProps {
 }
 
 export function AppShell({
-  sidebarHeader, sidebarBody, sidebarFooter, children,
+  headerContent, sidebarHeader, sidebarBody, sidebarFooter, children,
   sidebarWidth, collapsed, onToggleSidebar,
 }: AppShellProps) {
   return (
@@ -73,6 +75,11 @@ export function AppShell({
               ? <PanelLeftOpen className="size-4" aria-hidden />
               : <PanelLeftClose className="size-4" aria-hidden />}
           </button>
+
+          {/* min-w-0 จำเป็น — ไม่งั้นข้อความยาวดันปุ่มสลับแถบข้างหลุดจอ */}
+          {headerContent !== undefined && (
+            <div className="min-w-0 flex-1">{headerContent}</div>
+          )}
         </header>
 
         {/* ScrollPane วาดแถบเลื่อนเอง — แถบของ OS ถูกซ่อนตามการตั้งค่า Windows

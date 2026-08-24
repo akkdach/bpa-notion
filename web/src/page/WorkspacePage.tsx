@@ -6,6 +6,7 @@ import { useUiStore } from '@/store/uiStore'
 import { useAuth } from '@/features/auth'
 import { WorkspaceSwitcher, useCreateWorkspace } from '@/features/workspace'
 import {
+  PageHeaderMeta,
   PageTree,
   RecentChanges,
   buildTree,
@@ -82,6 +83,8 @@ export function WorkspacePage() {
       sidebarWidth={sidebarWidth}
       collapsed={sidebarCollapsed}
       onToggleSidebar={toggleSidebar}
+      // "ใครแก้หน้านี้ล่าสุด" อยู่บนแถบที่ไม่เลื่อน — เห็นได้ทุกจังหวะที่อ่าน
+      headerContent={pageId === undefined ? undefined : <PageHeaderMeta pageId={pageId} />}
       sidebarHeader={
         <div className="space-y-1">
           {switcher}
