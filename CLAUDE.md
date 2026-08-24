@@ -64,6 +64,7 @@ PR ที่แก้โค้ดโดยไม่แก้เอกสาร�
 | แก้อะไร | ต้องอัปเดตด้วย |
 |---|---|
 | เพิ่ม/แก้ MCP tool หรือพฤติกรรม (`mcp/`, `server/src/documents/`) | `mcp/README.md` + `.claude/skills/pm-tasks/SKILL.md` + rebuild dll |
+| แก้ `.claude/commands/summary.md` (เช่น เพิ่มชื่อคนในตาราง mapping) | `docs/RB-daily-summary.md` + หน้าคู่มือในแอป + สำเนาที่ `%USERPROFILE%\.claude\commands\` ของแต่ละคน |
 | เพิ่ม/แก้ endpoint หรือ contract ใน `server/src/*/` | `mcp/README.md` (ถ้า MCP ใช้) — ยังไม่มี `AS-*` ถ้าเริ่มเขียนให้วางใน `docs/` |
 | เพิ่ม config key / env | `README.md` + `.env.example` + `docker-compose.yml` (repo และฝั่ง NAS) |
 | แก้ `docker-compose.yml` / `web/nginx.conf` | ตามไปแก้ compose ฝั่ง NAS + `docs/RB-*` (ถ้ามี) |
@@ -78,6 +79,7 @@ PR ที่แก้โค้ดโดยไม่แก้เอกสาร�
 | `PLAN.md` / `PLAN-node.md` | สถาปัตยกรรม + phase (PLAN-node = การย้าย .NET → Node) |
 | `docs/ST-documentation-standard.md` | มาตรฐานชื่อไฟล์/โครงเอกสารของทีม |
 | `docs/RB-connect-ai.md` | ขั้นตอนเชื่อม Claude Code เข้าระบบผ่าน MCP (ติดตั้งต่อเครื่อง) |
+| `docs/RB-daily-summary.md` | คำสั่ง `/summary` — สรุปงานรายวันของทั้งทีมลงแอป (ตัวคำสั่งอยู่ `.claude/commands/summary.md`) |
 | `docs/deploy-iis.md` | เอกสารเดิมก่อนมาตรฐาน ST — แตะเมื่อไหร่ให้ rename เป็น prefix ตามมาตรฐาน |
 | `mcp/README.md` | สัญญาของ MCP ↔ API ฉบับเต็ม |
 | `.claude/skills/pm-tasks/SKILL.md` | คู่มือ AI ใช้ MCP (โหลดเข้า session อัตโนมัติ) |
