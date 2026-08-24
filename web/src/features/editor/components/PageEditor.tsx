@@ -15,7 +15,7 @@ import { Cloud, CloudOff, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useResolvedTheme } from '@/features/settings'
 import type { DocStatus } from '../hooks/useYDoc'
-import { uploadImage } from '../service/uploadApi'
+import { useUploadImage } from '../hooks/useUploadImage'
 import { MermaidPreview } from './mermaidPreview'
 
 import '@blocknote/core/fonts/inter.css'
@@ -39,6 +39,7 @@ interface PageEditorProps {
 
 export function PageEditor({ doc, status, editable, onChangeProjection }: PageEditorProps) {
   const theme = useResolvedTheme()
+  const uploadFile = useUploadImage()
 
   // fragment ต้องชื่อเดียวกันทุกที่ ไม่งั้นสองเครื่องจะแก้คนละเอกสาร
   const fragment = useMemo(() => doc.getXmlFragment('blocknote'), [doc])
@@ -88,10 +89,11 @@ export function PageEditor({ doc, status, editable, onChangeProjection }: PageEd
       extensions: [MermaidPreview({ theme })],
       // เปิดปุ่ม/ลากวาง/วางรูปจากคลิปบอร์ดของ image block — ถ้าไม่ใส่ BlockNote
       // จะมีให้แค่ embed จาก URL
-      uploadFile: uploadImage,
+      uploadFile,
     }),
     // theme อยู่ใน deps เพราะ mermaid เก็บธีมเป็น global state ของโมดูล
     // สลับโหมดมืดแล้วต้องสร้าง extension ใหม่เพื่อให้แผนภาพวาดใหม่ตามธีม
+    // (uploadFile ไม่ต้องอยู่ใน deps — useUploadImage คืน reference คงที่)
     [fragment, theme],
   )
 

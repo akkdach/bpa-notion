@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { formatRelative } from '@/lib/relativeTime'
 import { StatusChip } from './StatusChip'
+import { useEditorName } from '../hooks/useEditorName'
 import type { PageNode } from '../types'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -17,7 +18,10 @@ import type { PageNode } from '../types'
 interface RecentChangesProps {
   nodes: PageNode[]
   limit?: number
-  /** ตัวตนของคนที่ล็อกอินอยู่ — ใช้แยก "ฉันแก้" ออกจาก "คนอื่น/AI แก้" */
+  /**
+   * ตัวตนของคนที่ล็อกอินอยู่ — ยังรับไว้เพื่อไม่ให้ผู้เรียกเดิมพัง
+   * แต่การแยก "ฉัน / คนอื่น / AI" ย้ายไปอยู่ใน useEditorName แล้ว
+   */
   currentUserId?: string | undefined
   onSelect: (pageId: string) => void
 }
@@ -25,9 +29,10 @@ interface RecentChangesProps {
 export function RecentChanges({
   nodes,
   limit = 20,
-  currentUserId,
   onSelect,
 }: RecentChangesProps) {
+  const editorName = useEditorName()
+
   const recent = [...nodes]
     .filter((node) => node.deletedAt === undefined)
     // เรียงด้วย string ได้เพราะเป็น ISO-8601 UTC — เทียบตัวอักษรแล้วได้ลำดับเวลา
@@ -45,7 +50,8 @@ export function RecentChanges({
   return (
     <ul className="divide-y rounded-lg border">
       {recent.map((node) => {
-        const byOther = node.lastEditedBy !== undefined && node.lastEditedBy !== currentUserId
+        const editor = editorName(node.lastEditedBy)
+        const byOther = editor !== null && !editor.isMe
 
         return (
           <li key={node.id}>
@@ -60,9 +66,16 @@ export function RecentChanges({
                 <span className="block truncate text-sm">
                   {node.title.length > 0 ? node.title : 'ไม่มีชื่อ'}
                 </span>
+                {/* บอกชื่อคนแก้ ไม่ใช่แค่ "คนอื่น" — ไม่งั้นต้องไปเปิดฟีดกิจกรรม
+                    ทุกครั้งเพื่อตอบคำถามว่าใครแตะหน้านี้ */}
                 <span className={cn('text-xs', byOther ? 'text-warning' : 'text-muted-foreground')}>
                   {formatRelative(node.updatedAt)}
-                  {byOther && ' · แก้โดยคนอื่น'}
+                  {editor !== null && (
+                    <>
+                      {' · '}
+                      {editor.isMe ? 'คุณแก้' : `${editor.isAgent ? '🤖 ' : ''}${editor.name}`}
+                    </>
+                  )}
                 </span>
               </span>
 

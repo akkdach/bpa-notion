@@ -1,5 +1,8 @@
 export { PageTree } from './components/PageTree'
 export { PageIconButton } from './components/PageIconButton'
+export { LastEditedBy } from './components/LastEditedBy'
+export { useEditorName } from './hooks/useEditorName'
+export type { EditorIdentity } from './hooks/useEditorName'
 export { StatusChip } from './components/StatusChip'
 export { nextStatus, statusLabel, statusGlyph, statusTone } from './statusModel'
 export { TrashList } from './components/TrashList'

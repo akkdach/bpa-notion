@@ -95,13 +95,23 @@ export class DocumentService {
     if (!role) return PAGE_NOT_FOUND;
     if (!canEdit(role)) return NO_EDIT_PERMISSION;
 
+    const editorId = requireUserId();
+
     const seq = await this.docs.appendUpdate({
       workspaceId: requireWorkspaceId(),
       pageId,
       update,
       yClientId,
-      authorUserId: requireUserId(),
+      authorUserId: editorId,
     });
+
+    // ⚠️ ทางนี้คือทางเดียวที่เนื้อหาเปลี่ยนจริง — ทั้งการพิมพ์ในเบราว์เซอร์และ
+    //    การเขียนผ่าน MCP (writeBlocks เรียกเมธอดนี้) จึงเป็นที่ที่ถูกต้องสำหรับ
+    //    บันทึกว่าใครแก้ล่าสุด
+    //
+    //    เดิมไม่มีบรรทัดนี้ แล้วไปอาศัย updateTitleSilently ในทาง projection แทน
+    //    ผลคือ "คนแรกที่เปิดหน้าที่ AI เขียน" กลายเป็นคนแก้ล่าสุด ทั้งที่ไม่ได้พิมพ์
+    await this.pages.markEdited(pageId, editorId);
 
     const stats = await this.docs.stats(pageId);
 
@@ -214,8 +224,10 @@ export class DocumentService {
     //    2 วินาที และ title คือ "บรรทัดแรกของเอกสาร" ซึ่งเปลี่ยนไปเรื่อย ๆ ระหว่าง
     //    พิมพ์ประโยคแรก ถ้าบันทึกประวัติทุกครั้ง ฟีดกิจกรรมจะถูกกลบด้วยการเปลี่ยน
     //    ชื่อทีละตัวอักษรจนมองไม่เห็นสิ่งที่ AI ทำ ซึ่งเป็นเหตุผลที่ฟีดมีอยู่
+    // ⚠️ ไม่ส่ง userId เข้าไปแล้ว — ดูเหตุผลใน PageRepository.updateTitleSilently
+    //    (การ sync ชื่อไม่ใช่การประพันธ์ คนที่แค่เปิดหน้าดูก็ทำให้เกิดได้)
     if (title !== page.title) {
-      await this.pages.updateTitleSilently(pageId, title, requireUserId());
+      await this.pages.updateTitleSilently(pageId, title);
     }
 
     await this.docs.upsertProjection({

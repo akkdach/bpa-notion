@@ -270,11 +270,31 @@ export class PageRepository {
    *    ของเอกสาร" ซึ่งเปลี่ยนไปเรื่อย ๆ ระหว่างพิมพ์ประโยคแรก ถ้าบันทึกประวัติ
    *    ทุกครั้ง ฟีดกิจกรรมจะถูกกลบด้วยการเปลี่ยนชื่อทีละตัวอักษรจนมองไม่เห็น
    *    สิ่งที่ AI ทำ ซึ่งเป็นเหตุผลที่ฟีดมีอยู่
+   *
+   * ⚠️ **ห้ามแตะ lastEditedBy ที่นี่** — เคยตั้งไว้แล้วให้ผลผิด: การ sync ชื่อ
+   *    เกิดจาก "เบราว์เซอร์ตัวไหนก็ได้ที่เปิดหน้านั้นอยู่" ไม่ใช่การพิมพ์ของคน
+   *    หน้าที่ AI เขียนผ่าน MCP มี pages.title เป็นชื่อตอนสร้าง ส่วนบรรทัดแรก
+   *    ในเอกสารคือหัวเรื่องที่ AI เขียน — สองค่านี้ต่างกัน คนแรกที่เปิดหน้าจึง
+   *    ทำให้ระบบบันทึกว่า "เขาเป็นคนแก้ล่าสุด" ทั้งที่แค่เปิดดู
+   *    ตัวที่กำหนดคนแก้จริงคือ markEdited() ซึ่งเรียกจากทางเขียนเนื้อหา
    */
-  async updateTitleSilently(pageId: string, title: string, editorId: string): Promise<void> {
+  async updateTitleSilently(pageId: string, title: string): Promise<void> {
     await db()
       .update(pages)
-      .set({ title, lastEditedBy: editorId, updatedAt: sql`now()` })
+      .set({ title, updatedAt: sql`now()` })
+      .where(and(eq(pages.id, pageId), LIVE));
+  }
+
+  /**
+   * บันทึกว่าใครแก้เนื้อหาหน้านี้ล่าสุด — เรียกจากทางเขียน Yjs update เท่านั้น
+   *
+   * ⚠️ ไม่เขียน activity โดยเจตนา: การพิมพ์หนึ่งประโยคสร้าง update หลายสิบก้อน
+   *    ฟีดกิจกรรมมีไว้บันทึก "การกระทำ" (เปลี่ยนสถานะ ย้าย ลบ) ไม่ใช่ทุก keystroke
+   */
+  async markEdited(pageId: string, editorId: string): Promise<void> {
+    await db()
+      .update(pages)
+      .set({ lastEditedBy: editorId, updatedAt: sql`now()` })
       .where(and(eq(pages.id, pageId), LIVE));
   }
 
