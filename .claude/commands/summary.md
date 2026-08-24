@@ -39,9 +39,25 @@ $date  = '<YYYY-MM-DD>'
 $since = "${date}T00:00:00+07:00"
 $until = "${date}T23:59:59+07:00"
 
-# เอาเฉพาะ repo ที่มีการ push ตั้งแต่วันนั้น — ตัด repo ที่ไม่มีทางมีงานออกก่อน
-$repos = & $gh repo list $owner --limit 200 --json name,pushedAt |
-  ConvertFrom-Json | Where-Object { $_.pushedAt -ge $since } | ForEach-Object { $_.name }
+# ─── หา repo ที่ "คนรันคำสั่ง" มีสิทธิ์เห็น ────────────────────────────
+# ⚠️ ต้องรวมสองแหล่ง ไม่ใช่แหล่งเดียว:
+#   1. repo list <owner> — เห็นเฉพาะ public เมื่อ owner เป็นบัญชีของ "คนอื่น"
+#   2. user/repos?affiliation=collaborator — private ที่เราถูกเชิญเข้าไป
+# ถ้าใช้แค่ (1) คนในทีมที่ไม่ใช่เจ้าของ repo จะได้สรุปว่างเปล่าทั้งที่มีสิทธิ์อยู่
+$mine = & $gh api "user/repos?per_page=100&affiliation=owner,collaborator,organization_member" `
+  --paginate --jq ".[] | select(.owner.login==\"$owner\") | \"\(.name)|\(.pushed_at)\"" 2>$null
+$theirs = & $gh repo list $owner --limit 200 --json name,pushedAt `
+  --jq '.[] | "\(.name)|\(.pushedAt)"' 2>$null
+
+$repos = @($mine) + @($theirs) | Where-Object { $_ } | ForEach-Object {
+  $p = $_.Split('|'); [pscustomobject]@{ name = $p[0]; pushedAt = $p[1] }
+} | Where-Object { $_.pushedAt -ge $since } |
+    Sort-Object name -Unique | ForEach-Object { $_.name }
+
+if (-not $repos) {
+  # ไม่ใช่ "ไม่มีงาน" เสมอไป — อาจแปลว่ายังไม่ถูกเชิญเข้า repo เลย
+  "⚠️ ไม่พบ repo ที่เข้าถึงได้ใต้บัญชี $owner — ตรวจว่าถูกเชิญเป็น collaborator แล้วหรือยัง"
+}
 
 foreach ($r in $repos) {
   # ⚠️ ต้องไล่ทุก branch — ทีมนี้ทำงานบน uat-service_1 / icon-domain ไม่ใช่แค่ default
@@ -127,5 +143,8 @@ commit ไหนที่ชื่อไม่บอกว่าแก้อะ�
 ## ข้อจำกัดที่ต้องบอกผู้ใช้เสมอ
 
 - เห็นเฉพาะงานที่ **push ขึ้น GitHub แล้ว** — ที่ commit ค้างในเครื่องยังไม่ขึ้น
+- **เห็นเฉพาะ repo ที่บัญชี GitHub ของคนรันมีสิทธิ์เข้าถึง** — repo private ที่ยังไม่ถูก
+  เชิญเป็น collaborator จะไม่โผล่ · สรุปที่ได้จึงอาจไม่ครบเท่าของเจ้าของ repo
+  ถ้าเจอกรณีนี้ ให้บอกผู้ใช้ไปขอสิทธิ์จากเจ้าของบัญชี `akkdach`
 - งานที่ไม่ใช่โค้ด (ประชุม ตรวจระบบ คุยกับทีม) ไม่ปรากฏ ต้องให้ผู้ใช้เติมเอง
 - repo ที่ไม่ได้อยู่ใต้บัญชี `akkdach` จะไม่ถูกสแกน
